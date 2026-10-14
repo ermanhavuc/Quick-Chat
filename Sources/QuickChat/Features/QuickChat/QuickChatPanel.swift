@@ -9,8 +9,6 @@ final class QuickChatController: NSObject {
     /// Hosts that stay inside the panel (chat + sign-in flows); other links open in the browser.
     private static let inPanelHosts = ["chatgpt.com", "openai.com", "auth0.com", "google.com", "apple.com",
                                        "microsoftonline.com", "live.com", "microsoft.com"]
-    /// Like Classic's "Reset to new chat": after this long hidden, the next open starts a new chat.
-    private static let resetAfter: TimeInterval = 15 * 60
     private static let safariUserAgent =
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15"
 
@@ -18,7 +16,6 @@ final class QuickChatController: NSObject {
     private var panel: QuickChatPanel?
     private var webView: WKWebView?
     private var previousApp: NSRunningApplication?
-    private var hiddenAt: Date?
     /// Where each in-flight download is being written, for "reveal in Finder" when it finishes.
     private var downloadDestinations: [ObjectIdentifier: URL] = [:]
 
@@ -44,10 +41,6 @@ final class QuickChatController: NSObject {
 
     func show() {
         let panel = self.panel ?? makePanel()
-        if let hiddenAt, Date().timeIntervalSince(hiddenAt) > Self.resetAfter,
-           webView?.url?.path.hasPrefix("/c/") == true {
-            webView?.load(URLRequest(url: Self.chatURL))
-        }
         let front = NSWorkspace.shared.frontmostApplication
         if front?.processIdentifier != ProcessInfo.processInfo.processIdentifier { previousApp = front }
         NSApp.activate()
@@ -60,7 +53,6 @@ final class QuickChatController: NSObject {
     func hide(restoreFocus: Bool) {
         guard let panel, panel.isVisible else { return }
         panel.orderOut(nil)
-        hiddenAt = Date()
         if restoreFocus { previousApp?.activate() }
     }
 
@@ -229,6 +221,13 @@ extension QuickChatController: WKUIDelegate, WKNavigationDelegate, WKDownloadDel
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         focusComposer()
+    }
+
+    /// macOS may kill the web content process (often while hidden, under memory pressure), which
+    /// leaves the view blank; reload right away so it's ready before the panel is shown again.
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        log.info("Web content process terminated; reloading")
+        if webView.url != nil { webView.reload() } else { webView.load(URLRequest(url: Self.chatURL)) }
     }
 
     func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters,
