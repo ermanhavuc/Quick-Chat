@@ -81,6 +81,10 @@ This is the same "unbound" entry the ChatGPT app writes itself when it detects a
 
 ## Install
 
+**Let an AI assistant walk you through it:** tell Claude, ChatGPT or another assistant
+*"Read https://github.com/shuaibird/Quick-Chat/blob/main/INSTALL.md and help me install Quick Chat."*
+[INSTALL.md](INSTALL.md) gives it step-by-step instructions for both options below.
+
 ### Download (prebuilt)
 
 Get `Quick-Chat-<version>.zip` from the [latest release](https://github.com/shuaibird/Quick-Chat/releases/latest).
