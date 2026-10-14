@@ -6,7 +6,9 @@ Press ⌥Space anywhere on your Mac, ask a quick question, and get a plain ChatG
 
 Quick Chat is a small menu-bar app for macOS. It works alongside the new ChatGPT desktop app (and frees ⌥Space from its Mini shortcut), but it doesn't need it: without any ChatGPT app installed, it runs on its own as a standalone quick chat.
 
-![Quick Chat open in the middle of the screen, with its menu-bar menu open](docs/screenshot.png)
+https://github.com/user-attachments/assets/b1676c67-eaf0-4db0-b79d-7256ba2955d5
+
+*Reading an article, hitting an unfamiliar term, asking about it with ⌥Space, and getting back to reading.*
 
 ## Why this exists
 
