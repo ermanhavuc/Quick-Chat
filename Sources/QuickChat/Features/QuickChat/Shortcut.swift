@@ -12,6 +12,8 @@ struct Shortcut: Codable, Equatable {
     static let optionSpace = Shortcut(keyCode: UInt32(kVK_Space), carbonModifiers: UInt32(optionKey))
     /// Default local shortcut for resetting the Quick Chat panel's size.
     static let commandO = Shortcut(keyCode: UInt32(kVK_ANSI_O), carbonModifiers: UInt32(cmdKey), keyLabel: "O")
+    /// Default local shortcut for maximizing / restoring the Quick Chat panel.
+    static let commandF = Shortcut(keyCode: UInt32(kVK_ANSI_F), carbonModifiers: UInt32(cmdKey), keyLabel: "F")
 
     init(keyCode: UInt32, carbonModifiers: UInt32, keyLabel: String? = nil) {
         self.keyCode = keyCode
@@ -124,6 +126,8 @@ struct Shortcut: Codable, Equatable {
     private static let defaultsKey = "miniChat.shortcut" // pre-rename key; persisted, keep
     /// Local (panel-focused) shortcut for Reset Window Size.
     private static let resetSizeDefaultsKey = "quickChat.resetSizeShortcut"
+    /// Local (panel-focused) shortcut for Maximize / Restore Size.
+    private static let maximizeDefaultsKey = "quickChat.maximizeShortcut"
 
     /// The global Quick Chat toggle shortcut.
     static func load() -> Shortcut { load(key: defaultsKey, fallback: .optionSpace) }
@@ -132,6 +136,10 @@ struct Shortcut: Codable, Equatable {
     /// The Reset Window Size shortcut (works only while the Quick Chat panel is focused).
     static func loadResetSize() -> Shortcut { load(key: resetSizeDefaultsKey, fallback: .commandO) }
     func saveAsResetSize() { save(key: Self.resetSizeDefaultsKey) }
+
+    /// The Maximize / Restore Size shortcut (works only while the Quick Chat panel is focused).
+    static func loadMaximize() -> Shortcut { load(key: maximizeDefaultsKey, fallback: .commandF) }
+    func saveAsMaximize() { save(key: Self.maximizeDefaultsKey) }
 
     private static func load(key: String, fallback: Shortcut) -> Shortcut {
         guard let data = UserDefaults.standard.data(forKey: key),

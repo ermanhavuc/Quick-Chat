@@ -26,6 +26,11 @@ final class QuickChatController: NSObject {
         didSet { panel?.resetSizeShortcut = resetSizeShortcut }
     }
 
+    /// Local shortcut (only while the panel is key) that toggles maximize, like the green button.
+    var maximizeShortcut = Shortcut.loadMaximize() {
+        didSet { panel?.maximizeShortcut = maximizeShortcut }
+    }
+
     /// Resizes the panel back to `QuickChatPanel.defaultSize` (no-op if it was never built).
     func resetSize() { panel?.resetSize() }
 
@@ -82,6 +87,7 @@ final class QuickChatController: NSObject {
         let panel = QuickChatPanel(contentRect: NSRect(origin: .zero, size: QuickChatPanel.defaultSize))
         panel.onCancel = { [weak self] in self?.hide(restoreFocus: true) }
         panel.resetSizeShortcut = resetSizeShortcut
+        panel.maximizeShortcut = maximizeShortcut
 
         let header = DraggableView() // drag strip under the transparent title bar
         let webView = makeWebView()
@@ -285,17 +291,26 @@ final class QuickChatPanel: NSPanel {
     static let defaultSize = NSSize(width: 420, height: 560)
     var onCancel: (() -> Void)?
     /// Local key combo that calls `resetSize()` while the panel is key (default ⌘O).
-    var resetSizeShortcut: Shortcut? = .commandO {
+    var resetSizeShortcut: Shortcut? = .commandO
+    /// Local key combo that calls `toggleMaximize()` while the panel is key (default ⌘F).
+    var maximizeShortcut: Shortcut? = .commandF {
         didSet { updateZoomTooltip() }
     }
 
     /// System traffic-light buttons shown in the title bar's top-left cluster (the rest stay
     /// hidden). Red close goes through `close()` below, so it hides rather than destroys; green
-    /// zoom is rerouted to `resetSize()` (see `configureZoomButton()`).
+    /// zoom is rerouted to `toggleMaximize()` (see `configureZoomButton()`).
     static let trafficLights: [NSWindow.ButtonType] = [.closeButton, .zoomButton]
 
     /// Where the green button sits when minimize is hidden: minimize's slot, so there's no gap.
     private var zoomButtonOrigin: NSPoint?
+
+    /// The user's frame from before maximizing; non-nil while maximized. Hiding and showing
+    /// keep the panel maximized; a relaunch doesn't, as the maximized frame is never autosaved.
+    private var restoreFrame: NSRect?
+    var isMaximized: Bool { restoreFrame != nil }
+    /// Set while the panel changes its own frame, so only user moves/resizes end the maximize.
+    private var isSettingFrame = false
 
     init(contentRect: NSRect) {
         super.init(contentRect: contentRect,
@@ -304,7 +319,7 @@ final class QuickChatPanel: NSPanel {
         title = "ChatGPT"
         titleVisibility = .hidden
         titlebarAppearsTransparent = true
-        // No full screen or tiling: the green button shows the plain zoom glyph and only resets size.
+        // No full screen or tiling: the green button shows the plain zoom glyph and only maximizes.
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .fullScreenNone, .fullScreenDisallowsTiling]
         for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
             standardWindowButton(button)?.isHidden = !Self.trafficLights.contains(button)
@@ -317,18 +332,22 @@ final class QuickChatPanel: NSPanel {
         isMovableByWindowBackground = false
         minSize = NSSize(width: 400, height: 400)
         backgroundColor = .windowBackgroundColor
+        for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification] {
+            NotificationCenter.default.addObserver(self, selector: #selector(frameDidChange),
+                                                   name: name, object: self)
+        }
     }
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
 
-    /// Points the green button at `resetSize()` and, if minimize is hidden, slides it into
+    /// Points the green button at `toggleMaximize()` and, if minimize is hidden, slides it into
     /// minimize's slot next to close. AppKit re-lays out the title bar buttons (resize, key
     /// changes), so the button's frame changes are watched and the slot re-applied.
     private func configureZoomButton() {
         guard let zoom = standardWindowButton(.zoomButton), !zoom.isHidden else { return }
         zoom.target = self
-        zoom.action = #selector(resetSizeButtonClicked(_:))
+        zoom.action = #selector(maximizeButtonClicked(_:))
         updateZoomTooltip()
 
         guard !Self.trafficLights.contains(.miniaturizeButton),
@@ -352,24 +371,41 @@ final class QuickChatPanel: NSPanel {
     }
 
     private func updateZoomTooltip() {
-        var tip = "Reset Window Size"
-        if let resetSizeShortcut { tip += " (\(resetSizeShortcut.displayString))" }
+        var tip = isMaximized ? "Restore Size" : "Maximize"
+        if let maximizeShortcut { tip += " (\(maximizeShortcut.displayString))" }
         standardWindowButton(.zoomButton)?.toolTip = tip
     }
 
-    @objc private func resetSizeButtonClicked(_ sender: Any?) { resetSize() }
+    @objc private func maximizeButtonClicked(_ sender: Any?) { toggleMaximize() }
 
-    /// Title bar double-click / Window ▸ Zoom also reset rather than maximize.
-    override func zoom(_ sender: Any?) { resetSize() }
+    /// Title bar double-click / Window ▸ Zoom toggle maximize too, instead of AppKit's own zoom.
+    override func zoom(_ sender: Any?) { toggleMaximize() }
 
     /// Esc (when the page doesn't handle it) hides the panel.
     override func cancelOperation(_ sender: Any?) { onCancel?() }
 
-    /// Resizes to `defaultSize`, keeping the top-left corner put but staying on the visible
-    /// part of the screen. The frame autosave then persists the new size.
+    /// Fills the screen's visible frame (menu bar and Dock stay visible), or goes back to the
+    /// user's frame from before. The panel stays resizable while maximized.
+    func toggleMaximize() {
+        if let restoreFrame {
+            setOwnFrame(restoreFrame)
+            endMaximize()
+        } else {
+            guard let visible = (screen ?? NSScreen.main)?.visibleFrame else { return }
+            restoreFrame = frame
+            setFrameAutosaveName("") // keep the user's frame as the one restored on relaunch
+            setOwnFrame(visible)
+            updateZoomTooltip()
+        }
+    }
+
+    /// Resizes to `defaultSize`, keeping the top-left corner put (the pre-maximize one if
+    /// maximized) but staying on the visible part of the screen. The frame autosave then
+    /// persists the new size.
     func resetSize() {
+        let anchor = restoreFrame ?? frame
         let size = frameRect(forContentRect: NSRect(origin: .zero, size: Self.defaultSize)).size
-        var frame = NSRect(x: self.frame.minX, y: self.frame.maxY - size.height,
+        var frame = NSRect(x: anchor.minX, y: anchor.maxY - size.height,
                            width: size.width, height: size.height)
         if let visible = (screen ?? NSScreen.main)?.visibleFrame {
             frame.size.width = min(frame.width, visible.width)
@@ -377,28 +413,56 @@ final class QuickChatPanel: NSPanel {
             frame.origin.x = min(max(frame.minX, visible.minX), visible.maxX - frame.width)
             frame.origin.y = min(max(frame.minY, visible.minY), visible.maxY - frame.height)
         }
+        setOwnFrame(frame)
+        if isMaximized { endMaximize() }
+    }
+
+    /// Animated frame change that doesn't count as the user moving or resizing the panel.
+    private func setOwnFrame(_ frame: NSRect) {
+        isSettingFrame = true
+        defer { isSettingFrame = false }
         setFrame(frame, display: true, animate: true)
     }
 
-    /// Catches the Reset Window Size shortcut before the web view sees it. Done here rather
+    /// Leaves the maximized state as is (frame-wise) and resumes autosaving the current frame.
+    private func endMaximize() {
+        restoreFrame = nil
+        setFrameAutosaveName(Self.autosaveName)
+        saveFrame(usingName: Self.autosaveName)
+        updateZoomTooltip()
+    }
+
+    /// The user moved or resized the maximized panel: that frame becomes their own.
+    @objc private func frameDidChange() {
+        if isMaximized, !isSettingFrame { endMaximize() }
+    }
+
+    /// Runs the Reset Window Size or Maximize action if `event` is its shortcut.
+    private func handleLocalShortcut(_ event: NSEvent) -> Bool {
+        guard let pressed = Shortcut(event: event) else { return false }
+        if pressed == resetSizeShortcut {
+            resetSize()
+        } else if pressed == maximizeShortcut {
+            toggleMaximize()
+        } else {
+            return false
+        }
+        return true
+    }
+
+    /// Catches the panel's local shortcuts before the web view sees them. Done here rather
     /// than in `performKeyEquivalent` so combos without ⌘ (e.g. ⌥R, F5) work too.
     override func sendEvent(_ event: NSEvent) {
-        if event.type == .keyDown, let resetSizeShortcut, Shortcut(event: event) == resetSizeShortcut {
-            resetSize()
-            return
-        }
+        if event.type == .keyDown, handleLocalShortcut(event) { return }
         super.sendEvent(event)
     }
 
     override func close() { onCancel?() }
 
-    /// ⌘W hides; the Reset Window Size shortcut is caught here too, ahead of the web view
-    /// (which otherwise claims ⌘ combos).
+    /// ⌘W hides; the local shortcuts are caught here too, ahead of the web view (which
+    /// otherwise claims ⌘ combos).
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        if let resetSizeShortcut, Shortcut(event: event) == resetSizeShortcut {
-            resetSize()
-            return true
-        }
+        if handleLocalShortcut(event) { return true }
         if event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
            event.charactersIgnoringModifiers == "w" {
             onCancel?()

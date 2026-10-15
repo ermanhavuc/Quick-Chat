@@ -1,13 +1,14 @@
 import AppKit
 
 /// Small window for choosing Quick Chat's shortcuts: the global toggle and the local
-/// (panel-focused) Reset Window Size. The caller unregisters its global hotkey while this is
+/// (panel-focused) Reset Window Size and Maximize. The caller unregisters its global hotkey while this is
 /// open (otherwise the current shortcut would be swallowed).
 @MainActor
 final class ShortcutRecorderWindow: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private let recorder = RecorderField()
     private let resetSizeRecorder = RecorderField()
+    private let maximizeRecorder = RecorderField()
     private let hint = NSTextField(wrappingLabelWithString: "")
     /// Which shortcuts are accepted (mirrors `Shortcut.init?(event:)`); briefly replaced
     /// by the reason when an ineligible combo is pressed.
@@ -15,31 +16,33 @@ final class ShortcutRecorderWindow: NSObject, NSWindowDelegate {
     private var rulesResetToken = 0
     private var onChange: ((Shortcut) -> Void)?
     private var onResetSizeChange: ((Shortcut) -> Void)?
+    private var onMaximizeChange: ((Shortcut) -> Void)?
     private var onClose: (() -> Void)?
 
     /// `miniShortcut`: Show Mini's current shortcut, shown as a hint (picking it turns Show Mini off).
-    /// `resetSize`: the current Reset Window Size shortcut; it may never equal `current`.
-    func show(current: Shortcut, resetSize: Shortcut, miniShortcut: String?,
+    /// `resetSize`, `maximize`: the current local shortcuts. All three shortcuts stay distinct.
+    func show(current: Shortcut, resetSize: Shortcut, maximize: Shortcut, miniShortcut: String?,
               onChange: @escaping (Shortcut) -> Void,
               onResetSizeChange: @escaping (Shortcut) -> Void,
+              onMaximizeChange: @escaping (Shortcut) -> Void,
               onClose: @escaping () -> Void) {
         self.onChange = onChange
         self.onResetSizeChange = onResetSizeChange
+        self.onMaximizeChange = onMaximizeChange
         self.onClose = onClose
         recorder.shortcut = current
-        recorder.validate = { [weak self] new in
-            guard let self, new == self.resetSizeRecorder.shortcut else { return nil }
-            return "\(new.displayString) is already Reset Window Size.\nPick another combo, or change that one first."
-        }
-        recorder.onRecord = { [weak self] shortcut in self?.showRules(); self?.onChange?(shortcut) }
-        recorder.onReject = { [weak self] reason in self?.showRejection(reason) }
         resetSizeRecorder.shortcut = resetSize
-        resetSizeRecorder.validate = { [weak self] new in
-            guard let self, new == self.recorder.shortcut else { return nil }
-            return "\(new.displayString) is already the Quick Chat shortcut.\nPick another combo for Reset Window Size."
+        maximizeRecorder.shortcut = maximize
+        let fields: [(RecorderField, (Shortcut) -> Void)] = [
+            (recorder, { [weak self] in self?.onChange?($0) }),
+            (resetSizeRecorder, { [weak self] in self?.onResetSizeChange?($0) }),
+            (maximizeRecorder, { [weak self] in self?.onMaximizeChange?($0) }),
+        ]
+        for (field, record) in fields {
+            field.validate = { [weak self, unowned field] new in self?.conflict(new, for: field) }
+            field.onRecord = { [weak self] shortcut in self?.showRules(); record(shortcut) }
+            field.onReject = { [weak self] reason in self?.showRejection(reason) }
         }
-        resetSizeRecorder.onRecord = { [weak self] shortcut in self?.showRules(); self?.onResetSizeChange?(shortcut) }
-        resetSizeRecorder.onReject = { [weak self] reason in self?.showRejection(reason) }
         showRules()
 
         hint.stringValue = miniShortcut.map {
@@ -60,6 +63,15 @@ final class ShortcutRecorderWindow: NSObject, NSWindowDelegate {
 
     func close() { window?.close() }
 
+    /// Why `new` can't go in `field`: another of the three fields already has it.
+    private func conflict(_ new: Shortcut, for field: RecorderField) -> String? {
+        let names: [(RecorderField, String)] = [
+            (recorder, "the Quick Chat shortcut"), (resetSizeRecorder, "Reset Window Size"), (maximizeRecorder, "Maximize"),
+        ]
+        guard let name = names.first(where: { $0.0 !== field && $0.0.shortcut == new })?.1 else { return nil }
+        return "\(new.displayString) is already \(name).\nPick another combo, or change that one first."
+    }
+
     private func makeWindow() -> NSWindow {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 424, height: 292), // refit in show()
                               styleMask: [.titled, .closable], backing: .buffered, defer: false)
@@ -75,7 +87,11 @@ final class ShortcutRecorderWindow: NSObject, NSWindowDelegate {
                                                detail: "Works only while Quick Chat is focused.")
         let resetSizeReset = NSButton(title: "Reset to ⌘O", target: self, action: #selector(resetResetSizeToDefault))
         let resetSizeRow = NSStackView(views: [resetSizeRecorder, resetSizeReset])
-        for button in [reset, resetSizeReset] {
+        let maximizeLabel = Self.sectionLabel("Maximize / Restore Size",
+                                              detail: "Works only while Quick Chat is focused.")
+        let maximizeReset = NSButton(title: "Reset to ⌘F", target: self, action: #selector(resetMaximizeToDefault))
+        let maximizeRow = NSStackView(views: [maximizeRecorder, maximizeReset])
+        for button in [reset, resetSizeReset, maximizeReset] {
             button.setContentHuggingPriority(.required, for: .horizontal)
             button.widthAnchor.constraint(equalToConstant: 120).isActive = true
         }
@@ -85,16 +101,18 @@ final class ShortcutRecorderWindow: NSObject, NSWindowDelegate {
         let done = NSButton(title: "Done", target: self, action: #selector(finish))
         done.keyEquivalent = "\r"
         let buttons = NSStackView(views: [NSView(), done])
-        let stack = NSStackView(views: [label, row, hint, resetSizeLabel, resetSizeRow, rules, buttons])
+        let stack = NSStackView(views: [label, row, hint, resetSizeLabel, resetSizeRow,
+                                        maximizeLabel, maximizeRow, rules, buttons])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 12
         stack.setCustomSpacing(6, after: row)
         stack.setCustomSpacing(18, after: hint)
         stack.setCustomSpacing(18, after: resetSizeRow)
+        stack.setCustomSpacing(18, after: maximizeRow)
         stack.edgeInsets = NSEdgeInsets(top: 16, left: 20, bottom: 16, right: 20)
         row.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -40).isActive = true
-        for view in [resetSizeRow, rules, hint, buttons] {
+        for view in [resetSizeRow, maximizeRow, rules, hint, buttons] {
             view.widthAnchor.constraint(equalTo: row.widthAnchor).isActive = true
         }
         // Wrap at a fixed width so the fitted height is deterministic.
@@ -148,6 +166,13 @@ final class ShortcutRecorderWindow: NSObject, NSWindowDelegate {
         showRules()
         resetSizeRecorder.shortcut = .commandO
         onResetSizeChange?(.commandO)
+    }
+
+    @objc private func resetMaximizeToDefault() {
+        if let reason = maximizeRecorder.validate?(.commandF) { return showRejection(reason) }
+        showRules()
+        maximizeRecorder.shortcut = .commandF
+        onMaximizeChange?(.commandF)
     }
 
     @objc private func finish() { window?.close() }

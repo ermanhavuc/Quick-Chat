@@ -72,12 +72,16 @@ final class QuickChatFeature: Feature {
         hotKey = nil
         let previous = shortcut
         let previousResetSize = chat.resetSizeShortcut
-        recorder.show(current: shortcut, resetSize: chat.resetSizeShortcut,
+        let previousMaximize = chat.maximizeShortcut
+        recorder.show(current: shortcut, resetSize: chat.resetSizeShortcut, maximize: chat.maximizeShortcut,
                       miniShortcut: showMini.userShortcutDescription, onChange: { [weak self] new in
             self?.shortcut = new
         }, onResetSizeChange: { [weak self] new in
             self?.chat.resetSizeShortcut = new
             new.saveAsResetSize()
+        }, onMaximizeChange: { [weak self] new in
+            self?.chat.maximizeShortcut = new
+            new.saveAsMaximize()
         }, onClose: { [weak self] in
             guard let self, self.isEnabled else { return }
             do {
@@ -89,9 +93,14 @@ final class QuickChatFeature: Feature {
             } catch {
                 self.log.error("Shortcut rejected: \(error.localizedDescription, privacy: .public)")
                 self.shortcut = previous
-                if self.chat.resetSizeShortcut == previous { // keep the two distinct after reverting
+                // Keep the shortcuts distinct after reverting.
+                if self.chat.resetSizeShortcut == previous {
                     self.chat.resetSizeShortcut = previousResetSize
                     previousResetSize.saveAsResetSize()
+                }
+                if self.chat.maximizeShortcut == previous {
+                    self.chat.maximizeShortcut = previousMaximize
+                    previousMaximize.saveAsMaximize()
                 }
                 try? self.registerHotKey()
                 NSApp.activate()
