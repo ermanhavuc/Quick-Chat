@@ -45,7 +45,7 @@ Two features, both off until you turn them on from the menu-bar icon. Your choic
 - Voice works; macOS asks for microphone access the first time.
 - It doesn't need the ChatGPT desktop app. If the new app isn't installed, the Show Mini options are simply unavailable and the rest works the same.
 
-### ChatGPT's own keyboard shortcuts work too
+#### ChatGPT's own keyboard shortcuts work too
 
 chatgpt.com has built-in keyboard shortcuts, and they all reach the panel. Together they make the panel work almost like a standalone ChatGPT app, without touching the mouse:
 
@@ -64,7 +64,7 @@ These come from chatgpt.com's own **Keyboard shortcuts** dialog (⌘/), as of Oc
 
 Unbinds the new ChatGPT app's Show Mini shortcut (⌥Space by default). Mini itself still works from inside the app; only the shortcut is removed.
 
-### How it interacts with the ChatGPT app's shortcuts
+#### How it interacts with the ChatGPT app's shortcuts
 
 The new ChatGPT app reads its shortcuts from `~/.codex/keybindings.json` (or `$CODEX_HOME/keybindings.json`). To free ⌥Space, Quick Chat adds one entry there:
 
