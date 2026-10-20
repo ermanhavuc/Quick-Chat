@@ -6,9 +6,12 @@ import WebKit
 @MainActor
 final class QuickChatController: NSObject {
     private static let chatURL = URL(string: "https://chatgpt.com/")!
-    /// Hosts that stay inside the panel (chat + sign-in flows); other links open in the browser.
-    private static let inPanelHosts = ["chatgpt.com", "openai.com", "auth0.com", "google.com", "apple.com",
-                                       "microsoftonline.com", "live.com", "microsoft.com"]
+    /// Sign-in pages (OpenAI, Google, Apple, Microsoft), which with chatgpt.com are the only pages
+    /// links open inside Quick Chat. Just these hosts, not their whole sites: a link to e.g.
+    /// openai.com/terms or support.apple.com belongs in the browser.
+    private static let signInHosts = ["auth.openai.com", "auth0.openai.com", "auth0.com", "accounts.google.com",
+                                      "appleid.apple.com", "login.microsoftonline.com", "login.live.com",
+                                      "login.microsoft.com"]
     private static let safariUserAgent =
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15"
 
@@ -368,9 +371,17 @@ final class QuickChatController: NSObject {
         return candidate
     }
 
-    private static func staysInPanel(_ url: URL?) -> Bool {
-        guard let host = url?.host?.lowercased() else { return true } // about:blank, data:, etc.
-        return inPanelHosts.contains { host == $0 || host.hasSuffix("." + $0) }
+    /// Whether a link to `url` opens inside Quick Chat (chatgpt.com and sign-in pages, in the panel
+    /// or a popup) rather than in the default browser, or the default app for e.g. mailto: links.
+    /// Redirects and scripted navigations aren't links and always stay, as sign-ins pass through
+    /// other hosts.
+    static func opensInApp(_ url: URL?) -> Bool {
+        guard let url, let scheme = url.scheme?.lowercased() else { return true }
+        guard scheme == "https" || scheme == "http" else {
+            return ["about", "blob", "data", "javascript"].contains(scheme) // page-internal, not for other apps
+        }
+        let host = url.host?.lowercased() ?? ""
+        return isChatGPTHost(host) || signInHosts.contains { host == $0 || host.hasSuffix("." + $0) }
     }
 }
 
@@ -388,15 +399,15 @@ extension QuickChatController: NSWindowDelegate {
 // MARK: - WebKit delegates
 
 extension QuickChatController: WKUIDelegate, WKNavigationDelegate, WKDownloadDelegate {
-    /// `window.open` / target=_blank: sign-in pages open in a popup window of their own (see
-    /// `makePopup`), everything else goes to the browser.
+    /// `window.open` / target=_blank: chatgpt.com and sign-in pages open in a popup window of their
+    /// own (see `makePopup`), everything else in the default browser.
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                  for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         guard let url = navigationAction.request.url else { return nil }
         if Self.isGeneratedFile(url) {
             // window.open(blob:/data:) would otherwise replace the chat in the panel.
             webView.startDownload(using: navigationAction.request) { $0.delegate = self }
-        } else if Self.staysInPanel(url) {
+        } else if Self.opensInApp(url) {
             return makePopup(configuration: configuration, windowFeatures: windowFeatures)
         } else {
             NSWorkspace.shared.open(url)
@@ -419,7 +430,7 @@ extension QuickChatController: WKUIDelegate, WKNavigationDelegate, WKDownloadDel
             return
         }
         if navigationAction.targetFrame?.isMainFrame == true, navigationAction.navigationType == .linkActivated,
-           !Self.staysInPanel(url), let url {
+           !Self.opensInApp(url), let url {
             NSWorkspace.shared.open(url)
             decisionHandler(.cancel)
             return

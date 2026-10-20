@@ -90,6 +90,17 @@ enum PanelSelfTest {
         _ = press("n", [.command, .option])
         check(newChats == [false, true], "⌘N → new chat, ⇧⌘N → temporary; plain n and ⌥⌘N ignored", "\(newChats)")
 
+        print("6. links open in the default browser, except chatgpt.com and sign-in pages")
+        let inApp = ["https://chatgpt.com/c/123", "https://chatgpt.com/auth/login_with?connection=google-oauth2",
+                     "https://help.chatgpt.com/x", "https://auth.openai.com/log-in", "https://accounts.google.com/o/oauth2",
+                     "https://appleid.apple.com/auth/authorize", "https://login.microsoftonline.com/common",
+                     "about:blank", "blob:https://chatgpt.com/abc"]
+        let inBrowser = ["https://openai.com/terms", "https://help.openai.com/en/articles/1", "https://www.google.com/search?q=x",
+                         "https://support.apple.com/kb", "https://learn.microsoft.com/x", "https://notchatgpt.com/",
+                         "https://example.com/", "http://example.com/", "mailto:someone@example.com"]
+        for link in inApp { check(QuickChatController.opensInApp(URL(string: link)), "in app: \(link)") }
+        for link in inBrowser { check(!QuickChatController.opensInApp(URL(string: link)), "browser: \(link)") }
+
         print(failures == 0 ? "panel self-test: ALL PASSED" : "panel self-test: \(failures) FAILED")
         return failures == 0
     }
