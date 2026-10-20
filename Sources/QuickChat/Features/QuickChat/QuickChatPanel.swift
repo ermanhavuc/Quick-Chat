@@ -308,6 +308,10 @@ final class QuickChatController: NSObject {
     /// - The top bar is transparent, with only its button groups on pills, so a chat scrolled
     ///   under it showed through between and around the buttons. It now gets the page's surface
     ///   color, as the pills have.
+    /// - Under a chat's last message, 82px separated its action icons from the message box: 6px
+    ///   of list gap, 20px and 32px of padding, and the 24px "ChatGPT can make mistakes" line.
+    ///   That line is hidden and the padding cut to leave 16px, as at the box's sides. (The
+    ///   temporary chat notice is a different element and stays.)
     /// If chatgpt.com renames these hooks, the rules stop matching and the page looks as before.
     private static let pageLayoutCSS = """
         body, body [data-theme] { --thread-composer-bottom-inset: var(--thread-body-inline-padding, 1rem); }
@@ -316,6 +320,9 @@ final class QuickChatController: NSObject {
         }
         [class*="ComposerBannerPortal-"]:has(> * > :empty):not(:has(> * > :not(:empty))) { padding-bottom: 0; }
         header.draggable { background-color: var(--color-surface); }
+        [class~="text-codex-description"][class~="min-h-6"] { display: none; }
+        [class*="transcriptContent-"] { padding-bottom: 0; }
+        [class*="transcriptContent-"] > [class~="pb-5"] { padding-bottom: 10px; }
         """
 
     /// Adds `macColorsCSS` and `pageLayoutCSS` as a constructed style sheet, which survives the
