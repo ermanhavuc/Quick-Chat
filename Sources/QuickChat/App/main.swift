@@ -5,12 +5,16 @@ MainActor.assumeIsolated {
     if let suite = ProcessInfo.processInfo.environment["QUICKCHAT_SELFTEST"], ["keymap", "showmini"].contains(suite) {
         exit(KeymapSelfTest.run() ? 0 : 1)
     }
+    if ProcessInfo.processInfo.environment["QUICKCHAT_SELFTEST"] == "panel" {
+        NSApplication.shared.setActivationPolicy(.accessory)
+        exit(PanelSelfTest.run() ? 0 : 1)
+    }
     // Opens Quick Chat panel without enabling any feature (no keymap changes).
     if ProcessInfo.processInfo.environment["QUICKCHAT_DEBUG"] == "panel" {
+        NSApplication.shared.setActivationPolicy(.accessory) // creates NSApp, which EditMenu needs
         EditMenu.install()
         let chat = QuickChatController()
         DispatchQueue.main.async { chat.show() }
-        NSApplication.shared.setActivationPolicy(.accessory)
         withExtendedLifetime(chat) { NSApplication.shared.run() }
     }
     #endif
