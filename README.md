@@ -39,6 +39,7 @@ Two features, both off until you turn them on from the menu-bar icon. Your choic
 
 - A global shortcut (⌥Space by default; change it with **Change Shortcut…**) toggles a floating panel with chatgpt.com inside.
 - The panel is 420×560 by default, so chatgpt.com uses its compact layout. It is resizable; the size and position are remembered. It has no title bar, so chatgpt.com fills it to the top edge; ⌃⌘-drag anywhere in it to move it. ⌘F maximizes the panel to fill the screen, leaving the menu bar and Dock visible, and restores your size on a second press. ⌘O resets it to the default size.
+- The page is zoomed to 90% by default, so text is a little smaller than on chatgpt.com. ⌘− and ⌘= (or ⌘+) zoom out and in, ⌘0 goes back to 90%, and your zoom is remembered.
 - It stays on top of other windows and doesn't hide when you click elsewhere. The shortcut, Esc or ⌘W hides it.
 - Reopening the panel returns to the conversation you left. Press ⇧⌘O for a new chat.
 - Sign in once inside the panel. **Sign Out of Quick Chat** clears the panel's website data.
@@ -58,7 +59,7 @@ chatgpt.com has built-in keyboard shortcuts, and they all reach the panel. Toget
 | ⇧⌘⌫ | Delete chat |
 | ⌘/ | Show all shortcuts (and change them) |
 
-These come from chatgpt.com's own **Keyboard shortcuts** dialog (⌘/), as of October 2026. Quick Chat only reserves Esc and ⌘W (hide the panel) ⌘O (reset the panel size) and ⌘F (maximize or restore the panel).
+These come from chatgpt.com's own **Keyboard shortcuts** dialog (⌘/), as of October 2026. Quick Chat only reserves Esc and ⌘W (hide the panel) ⌘O (reset the panel size), ⌘F (maximize or restore the panel) and ⌘−, ⌘=, ⌘0 (zoom).
 
 ### Disable Show Mini Shortcut
 

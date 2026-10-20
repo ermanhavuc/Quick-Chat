@@ -34,6 +34,28 @@ final class QuickChatController: NSObject {
     /// Resizes the panel back to `QuickChatPanel.defaultSize` (no-op if it was never built).
     func resetSize() { panel?.resetSize() }
 
+    static let pageZoomDefaultsKey = "quickChat.pageZoom"
+    /// Below 100% so text is smaller than chatgpt.com's own; ⌘0 comes back here.
+    static let defaultPageZoom: CGFloat = 0.9
+    /// The ⌘− / ⌘= steps (Chrome's zoom levels).
+    private static let pageZoomLevels: [CGFloat] = [0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2]
+
+    /// chatgpt.com's zoom in the panel, remembered across launches.
+    private var pageZoom = UserDefaults.standard.object(forKey: pageZoomDefaultsKey) as? CGFloat ?? defaultPageZoom {
+        didSet {
+            webView?.pageZoom = pageZoom
+            UserDefaults.standard.set(Double(pageZoom), forKey: Self.pageZoomDefaultsKey)
+        }
+    }
+
+    /// Zooms one level out (`step` < 0) or in (> 0), or back to the default (0).
+    func zoom(_ step: Int) {
+        if step == 0 { pageZoom = Self.defaultPageZoom; return }
+        let next = step > 0 ? Self.pageZoomLevels.first { $0 > pageZoom + 0.001 }
+                            : Self.pageZoomLevels.last { $0 < pageZoom - 0.001 }
+        if let next { pageZoom = next } else { NSSound.beep() }
+    }
+
     /// Hides the panel whenever it's visible (focused or not), otherwise shows it. Focus goes
     /// back to the previous app only if the panel had it.
     func toggle() {
@@ -86,6 +108,7 @@ final class QuickChatController: NSObject {
     private func makePanel() -> QuickChatPanel {
         let panel = QuickChatPanel(contentRect: NSRect(origin: .zero, size: QuickChatPanel.defaultSize))
         panel.onCancel = { [weak self] in self?.hide(restoreFocus: true) }
+        panel.onZoom = { [weak self] in self?.zoom($0) }
         panel.resetSizeShortcut = resetSizeShortcut
         panel.maximizeShortcut = maximizeShortcut
 
@@ -118,6 +141,7 @@ final class QuickChatController: NSObject {
         config.mediaTypesRequiringUserActionForPlayback = []
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.customUserAgent = Self.safariUserAgent
+        webView.pageZoom = pageZoom
         webView.uiDelegate = self
         webView.navigationDelegate = self
         webView.allowsBackForwardNavigationGestures = true
@@ -284,6 +308,8 @@ final class QuickChatPanel: NSPanel {
     /// squat look of the new app's 470-wide window cut down to 560 tall.
     static let defaultSize = NSSize(width: 420, height: 560)
     var onCancel: (() -> Void)?
+    /// ⌘− / ⌘= (or ⌘+) / ⌘0: zoom the page out (-1), in (+1), or back to the default (0).
+    var onZoom: ((Int) -> Void)?
     /// Local key combo that calls `resetSize()` while the panel is key (default ⌘O).
     var resetSizeShortcut: Shortcut? = .commandO
     /// Local key combo that calls `toggleMaximize()` while the panel is key (default ⌘F).
@@ -412,13 +438,19 @@ final class QuickChatPanel: NSPanel {
 
     override func close() { onCancel?() }
 
-    /// ⌘W hides; the local shortcuts are caught here too, ahead of the web view (which
-    /// otherwise claims ⌘ combos).
+    /// ⌘W hides and ⌘− / ⌘= / ⌘0 zoom; the local shortcuts are caught here too, ahead of the
+    /// web view (which otherwise claims ⌘ combos).
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if handleLocalShortcut(event) { return true }
         if event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
            event.charactersIgnoringModifiers == "w" {
             onCancel?()
+            return true
+        }
+        // Matched by character, Shift allowed, so layouts with a shifted = or + work too.
+        if event.modifierFlags.intersection([.control, .option, .command]) == .command,
+           let step = ["-": -1, "=": 1, "+": 1, "0": 0][event.charactersIgnoringModifiers ?? ""] {
+            onZoom?(step)
             return true
         }
         return super.performKeyEquivalent(with: event)

@@ -13,6 +13,12 @@ enum PanelSelfTest {
     }
 
     static func run() -> Bool {
+        // Start from the default zoom; put the saved one back afterwards.
+        let defaults = UserDefaults.standard, zoomKey = QuickChatController.pageZoomDefaultsKey
+        let savedZoom = defaults.object(forKey: zoomKey)
+        defaults.removeObject(forKey: zoomKey)
+        defer { defaults.set(savedZoom, forKey: zoomKey) }
+
         let chat = QuickChatController()
         chat.show()
         defer { chat.tearDown() }
@@ -40,6 +46,33 @@ enum PanelSelfTest {
             check(hit?.isDescendant(of: webView) == true, "\(Int(y)) pt from the top hits the web view",
                   hit.map { "\(type(of: $0))" } ?? "nil")
         }
+
+        print("3. ⌘− / ⌘= / ⌘0 zoom the page, remembered")
+        func press(_ key: String, _ flags: NSEvent.ModifierFlags = .command) -> Bool {
+            let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0,
+                                         windowNumber: panel.windowNumber, context: nil, characters: key,
+                                         charactersIgnoringModifiers: key, isARepeat: false, keyCode: 0)!
+            return panel.performKeyEquivalent(with: event)
+        }
+        func zoomIs(_ expected: CGFloat, _ name: String) {
+            let page = Double(webView.pageZoom)
+            let saved = defaults.object(forKey: zoomKey) as? Double ?? page // nothing saved yet: the default
+            check(abs(page - expected) < 0.001 && abs(saved - expected) < 0.001, name, "page \(page), saved \(saved)")
+        }
+        zoomIs(QuickChatController.defaultPageZoom, "starts at the default (90%)")
+        check(press("-"), "⌘− handled")
+        zoomIs(0.8, "⌘− → 80%")
+        _ = press("=")
+        zoomIs(0.9, "⌘= → 90%")
+        _ = press("+", [.command, .shift])
+        zoomIs(1, "⇧⌘= (⌘+) → 100%")
+        _ = press("0")
+        zoomIs(0.9, "⌘0 → back to 90%")
+        for _ in 0..<10 { _ = press("-") }
+        zoomIs(0.5, "stops at 50%")
+        _ = press("0", [])
+        _ = press("0", [.command, .option])
+        zoomIs(0.5, "plain 0 and ⌥⌘0 don't zoom")
 
         print(failures == 0 ? "panel self-test: ALL PASSED" : "panel self-test: \(failures) FAILED")
         return failures == 0
