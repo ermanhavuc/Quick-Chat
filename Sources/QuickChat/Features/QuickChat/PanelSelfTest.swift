@@ -74,6 +74,14 @@ enum PanelSelfTest {
         _ = press("0", [.command, .option])
         zoomIs(0.5, "plain 0 and ⌥⌘0 don't zoom")
 
+        print("4. ⌘[ / ⌘] step the thinking effort")
+        var steps: [Int] = []
+        panel.onEffort = { steps.append($0) } // the page needs a signed-in session; check the routing only
+        check(press("[") && press("]"), "⌘[ and ⌘] handled")
+        _ = press("[", [])
+        _ = press("]", [.command, .control])
+        check(steps == [-1, 1], "⌘[ → down, ⌘] → up; plain [ and ⌃⌘] ignored", "\(steps)")
+
         print(failures == 0 ? "panel self-test: ALL PASSED" : "panel self-test: \(failures) FAILED")
         return failures == 0
     }

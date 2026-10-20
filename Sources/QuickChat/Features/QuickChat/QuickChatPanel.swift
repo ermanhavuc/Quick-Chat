@@ -56,6 +56,67 @@ final class QuickChatController: NSObject {
         if let next { pageZoom = next } else { NSSound.beep() }
     }
 
+    /// Set while `stepEffort` runs, so a held ⌘] can't open and close the picker over itself.
+    private var isSteppingEffort = false
+
+    /// Moves chatgpt.com's thinking effort (Instant, Medium, High…) one level down (`step` < 0)
+    /// or up (> 0). Beeps when there's no effort control or it's already at that end.
+    func stepEffort(_ step: Int) {
+        guard let webView, !isSteppingEffort else { return }
+        isSteppingEffort = true
+        webView.callAsyncJavaScript(Self.stepEffortScript, arguments: ["step": step, "composer": Self.composerSelector],
+                                    in: nil, in: .page) { [weak self] result in
+            guard let self else { return }
+            self.isSteppingEffort = false
+            switch result {
+            case .success(let level as String):
+                self.log.info("Thinking effort: \(level, privacy: .public)")
+            case .success:
+                NSSound.beep()
+            case .failure(let error):
+                self.log.error("Thinking effort: \(error.localizedDescription, privacy: .public)")
+                NSSound.beep()
+            }
+        }
+    }
+
+    /// The effort slider sits in the composer's model picker menu ("Power"; Left/Right arrow keys
+    /// adjust it, as the menu item's aria-keyshortcuts says). Opens the menu if needed, steps the
+    /// slider, closes the menu again and puts focus back in the composer. Returns the new level
+    /// ("High, 3 of 5."), or null if it didn't change. Depends on chatgpt.com's markup.
+    private static let stepEffortScript = """
+        const sleep = ms => new Promise(r => setTimeout(r, ms));
+        const findSlider = () => document.querySelector('[role="menu"] [role="menuitem"][aria-keyshortcuts~="ArrowRight"]');
+        const level = slider => slider.closest('[role="menu"]').querySelector('[role="status"]')?.textContent;
+        const press = (el, key) => el.dispatchEvent(new KeyboardEvent("keydown", {key, code: key, bubbles: true, cancelable: true}));
+        let slider = findSlider();
+        const opened = !slider;
+        if (opened) {
+          const trigger = document.querySelector('form button[aria-label="Select ChatGPT model"]')
+            ?? [...document.querySelectorAll('form button[aria-haspopup="menu"]')].pop();
+          if (!trigger) throw new Error("no model picker in the composer");
+          // Radix menus open on pointerdown, not click.
+          trigger.dispatchEvent(new PointerEvent("pointerdown", {bubbles: true, cancelable: true, button: 0, pointerType: "mouse", isPrimary: true}));
+          for (let i = 0; i < 20 && !(slider = findSlider()); i++) await sleep(25);
+          if (!slider) {
+            const menu = document.querySelector('[role="menu"]');
+            if (menu) press(menu, "Escape");
+            throw new Error("no effort slider in the model picker");
+          }
+        }
+        const before = level(slider);
+        slider.focus();
+        press(slider, step > 0 ? "ArrowRight" : "ArrowLeft");
+        await sleep(0);
+        const after = level(slider);
+        if (opened) {
+          press(slider.closest('[role="menu"]'), "Escape");
+          await sleep(50);
+          document.querySelector(composer)?.focus();
+        }
+        return after !== before ? after : null;
+        """
+
     /// Hides the panel whenever it's visible (focused or not), otherwise shows it. Focus goes
     /// back to the previous app only if the panel had it.
     func toggle() {
@@ -109,6 +170,7 @@ final class QuickChatController: NSObject {
         let panel = QuickChatPanel(contentRect: NSRect(origin: .zero, size: QuickChatPanel.defaultSize))
         panel.onCancel = { [weak self] in self?.hide(restoreFocus: true) }
         panel.onZoom = { [weak self] in self?.zoom($0) }
+        panel.onEffort = { [weak self] in self?.stepEffort($0) }
         panel.resetSizeShortcut = resetSizeShortcut
         panel.maximizeShortcut = maximizeShortcut
 
@@ -149,9 +211,13 @@ final class QuickChatController: NSObject {
         return webView
     }
 
+    /// chatgpt.com's composer: once a contenteditable #prompt-textarea, now an unnamed
+    /// contenteditable (ProseMirror) in the composer form.
+    private static let composerSelector = #"#prompt-textarea, form [contenteditable="true"]"#
+
     private func focusComposer() {
-        // Best effort: chatgpt.com's composer is a contenteditable #prompt-textarea.
-        webView?.evaluateJavaScript("document.querySelector('#prompt-textarea')?.focus()")
+        // Best effort, as the selector depends on chatgpt.com's markup.
+        webView?.evaluateJavaScript("document.querySelector('\(Self.composerSelector)')?.focus()")
     }
 
     /// chatgpt.com or a subdomain of it (not e.g. "notchatgpt.com").
@@ -310,6 +376,8 @@ final class QuickChatPanel: NSPanel {
     var onCancel: (() -> Void)?
     /// ⌘− / ⌘= (or ⌘+) / ⌘0: zoom the page out (-1), in (+1), or back to the default (0).
     var onZoom: ((Int) -> Void)?
+    /// ⌘[ / ⌘]: thinking effort one level down (-1) or up (+1).
+    var onEffort: ((Int) -> Void)?
     /// Local key combo that calls `resetSize()` while the panel is key (default ⌘O).
     var resetSizeShortcut: Shortcut? = .commandO
     /// Local key combo that calls `toggleMaximize()` while the panel is key (default ⌘F).
@@ -438,8 +506,8 @@ final class QuickChatPanel: NSPanel {
 
     override func close() { onCancel?() }
 
-    /// ⌘W hides and ⌘− / ⌘= / ⌘0 zoom; the local shortcuts are caught here too, ahead of the
-    /// web view (which otherwise claims ⌘ combos).
+    /// ⌘W hides, ⌘− / ⌘= / ⌘0 zoom and ⌘[ / ⌘] change the thinking effort; the local shortcuts
+    /// are caught here too, ahead of the web view (which otherwise claims ⌘ combos).
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if handleLocalShortcut(event) { return true }
         if event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
@@ -448,10 +516,16 @@ final class QuickChatPanel: NSPanel {
             return true
         }
         // Matched by character, Shift allowed, so layouts with a shifted = or + work too.
-        if event.modifierFlags.intersection([.control, .option, .command]) == .command,
-           let step = ["-": -1, "=": 1, "+": 1, "0": 0][event.charactersIgnoringModifiers ?? ""] {
-            onZoom?(step)
-            return true
+        if event.modifierFlags.intersection([.control, .option, .command]) == .command {
+            let key = event.charactersIgnoringModifiers ?? ""
+            if let step = ["-": -1, "=": 1, "+": 1, "0": 0][key] {
+                onZoom?(step)
+                return true
+            }
+            if let step = ["[": -1, "]": 1][key] {
+                onEffort?(step)
+                return true
+            }
         }
         return super.performKeyEquivalent(with: event)
     }
