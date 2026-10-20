@@ -124,7 +124,7 @@ struct Shortcut: Codable, Equatable {
     // MARK: Persistence
 
     private static let defaultsKey = "miniChat.shortcut" // pre-rename key; persisted, keep
-    /// Local (panel-focused) shortcut for Reset Window Size.
+    /// Local (panel-focused) shortcut for Reset Size & Position.
     private static let resetSizeDefaultsKey = "quickChat.resetSizeShortcut"
     /// Local (panel-focused) shortcut for Maximize / Restore Size.
     private static let maximizeDefaultsKey = "quickChat.maximizeShortcut"
@@ -133,7 +133,7 @@ struct Shortcut: Codable, Equatable {
     static func load() -> Shortcut { load(key: defaultsKey, fallback: .optionSpace) }
     func save() { save(key: Self.defaultsKey) }
 
-    /// The Reset Window Size shortcut (works only while the Quick Chat panel is focused).
+    /// The Reset Size & Position shortcut (works only while the Quick Chat panel is focused).
     static func loadResetSize() -> Shortcut { load(key: resetSizeDefaultsKey, fallback: .commandO) }
     func saveAsResetSize() { save(key: Self.resetSizeDefaultsKey) }
 

@@ -1,7 +1,7 @@
 import AppKit
 
 /// Small window for choosing Quick Chat's shortcuts: the global toggle and the local
-/// (panel-focused) Reset Window Size and Maximize. The caller unregisters its global hotkey while this is
+/// (panel-focused) Reset Size & Position and Maximize. The caller unregisters its global hotkey while this is
 /// open (otherwise the current shortcut would be swallowed).
 @MainActor
 final class ShortcutRecorderWindow: NSObject, NSWindowDelegate {
@@ -66,7 +66,7 @@ final class ShortcutRecorderWindow: NSObject, NSWindowDelegate {
     /// Why `new` can't go in `field`: another of the three fields already has it.
     private func conflict(_ new: Shortcut, for field: RecorderField) -> String? {
         let names: [(RecorderField, String)] = [
-            (recorder, "the Quick Chat shortcut"), (resetSizeRecorder, "Reset Window Size"), (maximizeRecorder, "Maximize"),
+            (recorder, "the Quick Chat shortcut"), (resetSizeRecorder, "Reset Size & Position"), (maximizeRecorder, "Maximize"),
         ]
         guard let name = names.first(where: { $0.0 !== field && $0.0.shortcut == new })?.1 else { return nil }
         return "\(new.displayString) is already \(name).\nPick another combo, or change that one first."
@@ -83,7 +83,7 @@ final class ShortcutRecorderWindow: NSObject, NSWindowDelegate {
         let label = Self.sectionLabel("Quick Chat", detail: "Opens Quick Chat from any app.")
         let reset = NSButton(title: "Reset to ⌥Space", target: self, action: #selector(resetToDefault))
         let row = NSStackView(views: [recorder, reset])
-        let resetSizeLabel = Self.sectionLabel("Reset Window Size",
+        let resetSizeLabel = Self.sectionLabel("Reset Size & Position",
                                                detail: "Works only while Quick Chat is focused.")
         let resetSizeReset = NSButton(title: "Reset to ⌘O", target: self, action: #selector(resetResetSizeToDefault))
         let resetSizeRow = NSStackView(views: [resetSizeRecorder, resetSizeReset])

@@ -38,7 +38,7 @@ Two features, both off until you turn them on from the menu-bar icon. Your choic
 ### Quick Chat
 
 - A global shortcut (⌥Space by default; change it with **Change Shortcut…**) toggles a floating panel with chatgpt.com inside.
-- The panel is 420×560 by default, so chatgpt.com uses its compact layout. It is resizable; the size and position are remembered. It has no title bar, so chatgpt.com fills it to the top edge; ⌃⌘-drag anywhere in it to move it. ⌘F maximizes the panel to fill the screen, leaving the menu bar and Dock visible, and restores your size on a second press. ⌘O resets it to the default size.
+- The panel opens at the bottom center of the screen, just above the Dock, at 420×560, so chatgpt.com uses its compact layout. It is resizable and movable; the size and position are remembered. It has no title bar, so chatgpt.com fills it to the top edge; ⌃⌘-drag anywhere in it to move it. ⌘F maximizes the panel to fill the screen, leaving the menu bar and Dock visible, and restores your size on a second press. ⌘O puts it back at the bottom center at the default size.
 - The page is zoomed to 90% by default, so text is a little smaller than on chatgpt.com. ⌘− and ⌘= (or ⌘+) zoom out and in, ⌘0 goes back to 90%, and your zoom is remembered.
 - ⌘[ and ⌘] lower and raise the thinking effort (Instant, Medium, High…) without opening the model picker yourself. They step the effort slider in chatgpt.com's model picker, so they need you signed in and stop working if chatgpt.com changes that picker.
 - It stays on top of other windows and doesn't hide when you click elsewhere. The shortcut, Esc or ⌘W hides it.
@@ -60,7 +60,7 @@ chatgpt.com has built-in keyboard shortcuts, and they all reach the panel. Toget
 | ⇧⌘⌫ | Delete chat |
 | ⌘/ | Show all shortcuts (and change them) |
 
-These come from chatgpt.com's own **Keyboard shortcuts** dialog (⌘/), as of October 2026. Quick Chat only reserves Esc and ⌘W (hide the panel), ⌘N and ⇧⌘N (new chat, new temporary chat), ⌘O (reset the panel size), ⌘F (maximize or restore the panel), ⌘−, ⌘=, ⌘0 (zoom) and ⌘[, ⌘] (thinking effort).
+These come from chatgpt.com's own **Keyboard shortcuts** dialog (⌘/), as of October 2026. Quick Chat only reserves Esc and ⌘W (hide the panel), ⌘N and ⇧⌘N (new chat, new temporary chat), ⌘O (reset the panel's size and position), ⌘F (maximize or restore the panel), ⌘−, ⌘=, ⌘0 (zoom) and ⌘[, ⌘] (thinking effort).
 
 ### Disable Show Mini Shortcut
 

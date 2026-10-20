@@ -36,7 +36,8 @@ final class QuickChatController: NSObject {
         didSet { panel?.maximizeShortcut = maximizeShortcut }
     }
 
-    /// Resizes the panel back to `QuickChatPanel.defaultSize` (no-op if it was never built).
+    /// Puts the panel back to its default size at the bottom center of its screen (no-op if it
+    /// was never built).
     func resetSize() { panel?.resetSize() }
 
     static let pageZoomDefaultsKey = "quickChat.pageZoom"
@@ -210,7 +211,11 @@ final class QuickChatController: NSObject {
         panel.contentView = webView
 
         if !panel.setFrameUsingName(QuickChatPanel.autosaveName) {
-            center(panel)
+            // First open: the bottom center of the screen with the mouse.
+            let mouse = NSEvent.mouseLocation
+            if let screen = NSScreen.screens.first(where: { $0.frame.contains(mouse) }) ?? NSScreen.main {
+                panel.setFrame(panel.defaultFrame(on: screen), display: false)
+            }
         }
         panel.setFrameAutosaveName(QuickChatPanel.autosaveName)
 
@@ -247,15 +252,6 @@ final class QuickChatController: NSObject {
         popups.append(popup)
         popup.makeKeyAndOrderFront(nil)
         return webView
-    }
-
-    private func center(_ panel: NSPanel) {
-        let mouse = NSEvent.mouseLocation
-        let screen = NSScreen.screens.first { $0.frame.contains(mouse) } ?? NSScreen.main
-        guard let visible = screen?.visibleFrame else { return }
-        let size = panel.frame.size
-        panel.setFrameOrigin(NSPoint(x: visible.midX - size.width / 2,
-                                     y: visible.minY + (visible.height - size.height) * 0.6))
     }
 
     private func makeWebView() -> WKWebView {
@@ -588,21 +584,25 @@ final class QuickChatPanel: NSPanel {
         }
     }
 
-    /// Resizes to `defaultSize`, keeping the top-left corner put (the pre-maximize one if
-    /// maximized) but staying on the visible part of the screen. The frame autosave then
-    /// persists the new size.
+    /// Gap between the panel and the bottom of the screen's visible area (the Dock, if it's there).
+    static let bottomMargin: CGFloat = 16
+
+    /// `defaultSize` at the bottom center of `screen`'s visible area: where the panel first
+    /// opens, and where `resetSize()` puts it back.
+    func defaultFrame(on screen: NSScreen) -> NSRect {
+        let visible = screen.visibleFrame
+        var size = frameRect(forContentRect: NSRect(origin: .zero, size: Self.defaultSize)).size
+        size.width = min(size.width, visible.width)
+        size.height = min(size.height, visible.height - Self.bottomMargin)
+        return NSRect(x: visible.midX - size.width / 2, y: visible.minY + Self.bottomMargin,
+                      width: size.width, height: size.height)
+    }
+
+    /// Back to `defaultFrame` on the panel's screen (size and position), also from maximized.
+    /// The frame autosave then persists it.
     func resetSize() {
-        let anchor = restoreFrame ?? frame
-        let size = frameRect(forContentRect: NSRect(origin: .zero, size: Self.defaultSize)).size
-        var frame = NSRect(x: anchor.minX, y: anchor.maxY - size.height,
-                           width: size.width, height: size.height)
-        if let visible = (screen ?? NSScreen.main)?.visibleFrame {
-            frame.size.width = min(frame.width, visible.width)
-            frame.size.height = min(frame.height, visible.height)
-            frame.origin.x = min(max(frame.minX, visible.minX), visible.maxX - frame.width)
-            frame.origin.y = min(max(frame.minY, visible.minY), visible.maxY - frame.height)
-        }
-        setOwnFrame(frame)
+        guard let screen = screen ?? NSScreen.main else { return }
+        setOwnFrame(defaultFrame(on: screen))
         if isMaximized { endMaximize() }
     }
 
@@ -625,7 +625,7 @@ final class QuickChatPanel: NSPanel {
         if isMaximized, !isSettingFrame { endMaximize() }
     }
 
-    /// Runs the Reset Window Size or Maximize action if `event` is its shortcut.
+    /// Runs the Reset Size & Position or Maximize action if `event` is its shortcut.
     private func handleLocalShortcut(_ event: NSEvent) -> Bool {
         guard let pressed = Shortcut(event: event) else { return false }
         if pressed == resetSizeShortcut {

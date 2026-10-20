@@ -13,11 +13,12 @@ enum PanelSelfTest {
     }
 
     static func run() -> Bool {
-        // Start from the default zoom; put the saved one back afterwards.
+        // Start from the default zoom and no saved panel frame; put the saved ones back afterwards.
         let defaults = UserDefaults.standard, zoomKey = QuickChatController.pageZoomDefaultsKey
-        let savedZoom = defaults.object(forKey: zoomKey)
-        defaults.removeObject(forKey: zoomKey)
-        defer { defaults.set(savedZoom, forKey: zoomKey) }
+        let frameKey = "NSWindow Frame \(QuickChatPanel.autosaveName)"
+        let saved = [zoomKey, frameKey].map { ($0, defaults.object(forKey: $0)) }
+        for (key, _) in saved { defaults.removeObject(forKey: key) }
+        defer { for (key, value) in saved { defaults.set(value, forKey: key) } }
 
         let chat = QuickChatController()
         chat.show()
@@ -48,10 +49,10 @@ enum PanelSelfTest {
         }
 
         print("3. ⌘− / ⌘= / ⌘0 zoom the page, remembered")
-        func press(_ key: String, _ flags: NSEvent.ModifierFlags = .command) -> Bool {
+        func press(_ key: String, _ flags: NSEvent.ModifierFlags = .command, keyCode: UInt16 = 0) -> Bool {
             let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0,
                                          windowNumber: panel.windowNumber, context: nil, characters: key,
-                                         charactersIgnoringModifiers: key, isARepeat: false, keyCode: 0)!
+                                         charactersIgnoringModifiers: key, isARepeat: false, keyCode: keyCode)!
             return panel.performKeyEquivalent(with: event)
         }
         func zoomIs(_ expected: CGFloat, _ name: String) {
@@ -90,7 +91,23 @@ enum PanelSelfTest {
         _ = press("n", [.command, .option])
         check(newChats == [false, true], "⌘N → new chat, ⇧⌘N → temporary; plain n and ⌥⌘N ignored", "\(newChats)")
 
-        print("6. links open in the default browser, except chatgpt.com and sign-in pages")
+        print("6. opens at the bottom center of the screen; ⌘O goes back there")
+        func atBottomCenter(_ name: String) {
+            guard let visible = panel.screen?.visibleFrame else { return check(false, name, "no screen") }
+            let f = panel.frame
+            check(abs(f.midX - visible.midX) < 1 && abs(f.minY - (visible.minY + QuickChatPanel.bottomMargin)) < 1
+                  && f.size == QuickChatPanel.defaultSize, name, "\(f) in \(visible)")
+        }
+        atBottomCenter("first open: 420×560, centered, 16 pt above the Dock")
+        panel.setFrame(NSRect(x: 100, y: 300, width: 600, height: 700), display: false)
+        check(press("o", keyCode: 31), "⌘O handled") // kVK_ANSI_O
+        atBottomCenter("⌘O after moving and resizing")
+        panel.toggleMaximize()
+        _ = press("o", keyCode: 31)
+        atBottomCenter("⌘O while maximized")
+        check(!panel.isMaximized, "… and no longer maximized")
+
+        print("7. links open in the default browser, except chatgpt.com and sign-in pages")
         let inApp = ["https://chatgpt.com/c/123", "https://chatgpt.com/auth/login_with?connection=google-oauth2",
                      "https://help.chatgpt.com/x", "https://auth.openai.com/log-in", "https://accounts.google.com/o/oauth2",
                      "https://appleid.apple.com/auth/authorize", "https://login.microsoftonline.com/common",
