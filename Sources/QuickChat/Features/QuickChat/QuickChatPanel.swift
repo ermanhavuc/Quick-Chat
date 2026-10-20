@@ -15,6 +15,8 @@ final class QuickChatController: NSObject {
     private let log = Log.make("QuickChat")
     private var panel: QuickChatPanel?
     private var webView: WKWebView?
+    /// Open popup windows (see `makePopup`); each one leaves this list when it closes.
+    private var popups: [NSWindow] = []
     private var previousApp: NSRunningApplication?
     /// Where each in-flight download is being written, for "reveal in Finder" when it finishes.
     private var downloadDestinations: [ObjectIdentifier: URL] = [:]
@@ -146,6 +148,7 @@ final class QuickChatController: NSObject {
 
     /// Closes the panel and releases the web view (the sign-in session stays in the data store).
     func tearDown() {
+        for popup in popups { popup.close() }
         panel?.orderOut(nil)
         webView?.stopLoading()
         panel?.contentView = nil
@@ -186,6 +189,35 @@ final class QuickChatController: NSObject {
         self.webView = webView
         webView.load(URLRequest(url: Self.chatURL))
         return panel
+    }
+
+    /// A window for a page opened with `window.open` / target=_blank, like a browser's popup. The
+    /// web view must come from WebKit's `configuration` so the page keeps its `window.opener`:
+    /// popup sign-ins (Google's "Continue as" card) post their result back through it and then
+    /// close themselves. Loading such pages in the panel instead left a blank Google page.
+    private func makePopup(configuration: WKWebViewConfiguration, windowFeatures: WKWindowFeatures) -> WKWebView {
+        let size = NSSize(width: windowFeatures.width?.doubleValue ?? 480, height: windowFeatures.height?.doubleValue ?? 640)
+        let webView = WKWebView(frame: NSRect(origin: .zero, size: size), configuration: configuration)
+        webView.customUserAgent = Self.safariUserAgent // Google refuses sign-in from web views that look embedded
+        webView.uiDelegate = self
+        webView.navigationDelegate = self
+
+        let popup = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .closable, .resizable],
+                             backing: .buffered, defer: false)
+        popup.isReleasedWhenClosed = false
+        popup.level = .floating // same level as the panel, ordered in front of it
+        popup.contentView = webView
+        popup.bind(.title, to: webView, withKeyPath: "title", options: [.nullPlaceholder: "Quick Chat"])
+        popup.delegate = self
+        if let panel {
+            popup.setFrameOrigin(NSPoint(x: panel.frame.midX - popup.frame.width / 2,
+                                         y: panel.frame.midY - popup.frame.height / 2))
+        } else {
+            popup.center()
+        }
+        popups.append(popup)
+        popup.makeKeyAndOrderFront(nil)
+        return webView
     }
 
     private func center(_ panel: NSPanel) {
@@ -256,10 +288,22 @@ final class QuickChatController: NSObject {
     }
 }
 
+// MARK: - Popup windows
+
+extension QuickChatController: NSWindowDelegate {
+    /// A popup closed (by its page or by the user): drop it, which releases its web view.
+    func windowWillClose(_ notification: Notification) {
+        guard let popup = notification.object as? NSWindow else { return }
+        popup.unbind(.title)
+        popups.removeAll { $0 === popup }
+    }
+}
+
 // MARK: - WebKit delegates
 
 extension QuickChatController: WKUIDelegate, WKNavigationDelegate, WKDownloadDelegate {
-    /// `window.open` / target=_blank: sign-in pages stay in the panel, everything else goes to the browser.
+    /// `window.open` / target=_blank: sign-in pages open in a popup window of their own (see
+    /// `makePopup`), everything else goes to the browser.
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                  for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         guard let url = navigationAction.request.url else { return nil }
@@ -267,11 +311,16 @@ extension QuickChatController: WKUIDelegate, WKNavigationDelegate, WKDownloadDel
             // window.open(blob:/data:) would otherwise replace the chat in the panel.
             webView.startDownload(using: navigationAction.request) { $0.delegate = self }
         } else if Self.staysInPanel(url) {
-            webView.load(navigationAction.request)
+            return makePopup(configuration: configuration, windowFeatures: windowFeatures)
         } else {
             NSWorkspace.shared.open(url)
         }
         return nil
+    }
+
+    /// The page called `window.close()` on a popup (e.g. a sign-in popup that has finished).
+    func webViewDidClose(_ webView: WKWebView) {
+        popups.first { $0.contentView === webView }?.close()
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
@@ -323,11 +372,11 @@ extension QuickChatController: WKUIDelegate, WKNavigationDelegate, WKDownloadDel
     func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters,
                  initiatedByFrame frame: WKFrameInfo,
                  completionHandler: @escaping @MainActor ([URL]?) -> Void) {
-        guard let panel else { return completionHandler(nil) }
+        guard let window = webView.window else { return completionHandler(nil) } // the panel or a popup
         let open = NSOpenPanel()
         open.allowsMultipleSelection = parameters.allowsMultipleSelection
         open.canChooseDirectories = parameters.allowsDirectories
-        open.beginSheetModal(for: panel) { response in
+        open.beginSheetModal(for: window) { response in
             completionHandler(response == .OK ? open.urls : nil)
         }
     }

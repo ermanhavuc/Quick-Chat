@@ -43,7 +43,7 @@ Two features, both off until you turn them on from the menu-bar icon. Your choic
 - ⌘[ and ⌘] lower and raise the thinking effort (Instant, Medium, High…) without opening the model picker yourself. They step the effort slider in chatgpt.com's model picker, so they need you signed in and stop working if chatgpt.com changes that picker.
 - It stays on top of other windows and doesn't hide when you click elsewhere. The shortcut, Esc or ⌘W hides it.
 - Reopening the panel returns to the conversation you left. Press ⇧⌘O for a new chat.
-- Sign in once inside the panel. **Sign Out of Quick Chat** clears the panel's website data.
+- Sign in once inside the panel. Sign-in pop-ups, such as Google's "Continue as" card, open in a window of their own that closes when you're done; so do links that open a new tab on ChatGPT and OpenAI pages. **Sign Out of Quick Chat** clears the panel's website data.
 - Voice works; macOS asks for microphone access the first time.
 - It doesn't need the ChatGPT desktop app. If the new app isn't installed, the Show Mini options are simply unavailable and the rest works the same.
 
