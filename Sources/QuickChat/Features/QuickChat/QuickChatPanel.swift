@@ -259,7 +259,7 @@ final class QuickChatController: NSObject {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default()
         config.mediaTypesRequiringUserActionForPlayback = []
-        config.userContentController.addUserScript(WKUserScript(source: Self.pageLayoutScript,
+        config.userContentController.addUserScript(WKUserScript(source: Self.pageStyleScript,
                                                                 injectionTime: .atDocumentStart, forMainFrameOnly: true))
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.customUserAgent = Self.safariUserAgent
@@ -282,6 +282,24 @@ final class QuickChatController: NSObject {
         webView?.evaluateJavaScript(Self.focusComposerScript)
     }
 
+    /// Mac colors for chatgpt.com's surfaces: the page and its top bar, sidebar and side rail take
+    /// macOS's content background, and the message box a step lighter (darker in light mode). These
+    /// system colors follow the page's own Light/Dark theme. chatgpt.com's accent (send button,
+    /// your messages, selection) is left alone.
+    private static let macColorsCSS = """
+        :root, [data-theme] {
+          --quick-chat-surface: -apple-system-control-background;
+          --quick-chat-elevated: color-mix(in srgb, -apple-system-control-background 92%, -apple-system-label);
+          --app-color-background-surface: var(--quick-chat-surface);
+          --app-color-background-surface-under: var(--quick-chat-surface);
+          --app-color-background-shell: var(--quick-chat-surface);
+          --color-background-panel: var(--quick-chat-surface);
+          --app-color-background-elevated-primary: var(--quick-chat-elevated);
+          --app-color-background-elevated-primary-opaque: var(--quick-chat-elevated);
+          --color-background-composer-surface: var(--quick-chat-elevated);
+        }
+        """
+
     /// Layout fixes for chatgpt.com's browser-tab layout, which shows a bit off in the panel:
     /// - The gap under the message box is 24px in a chat, and 24px plus 16px kept for an (empty)
     ///   notice on the new-chat page, against 16px at the sides; it showed as a dark strip under
@@ -300,12 +318,12 @@ final class QuickChatController: NSObject {
         header.draggable { background-color: var(--color-surface); }
         """
 
-    /// Adds `pageLayoutCSS` as a constructed style sheet, which survives the page re-rendering
-    /// its own DOM. Its rules aren't in a cascade layer, so they beat chatgpt.com's.
-    private static let pageLayoutScript = """
+    /// Adds `macColorsCSS` and `pageLayoutCSS` as a constructed style sheet, which survives the
+    /// page re-rendering its own DOM. Its rules aren't in a cascade layer, so they beat chatgpt.com's.
+    private static let pageStyleScript = """
         if (location.hostname === "chatgpt.com") {
           const sheet = new CSSStyleSheet();
-          sheet.replaceSync(\(String(decoding: try! JSONEncoder().encode(pageLayoutCSS), as: UTF8.self)));
+          sheet.replaceSync(\(String(decoding: try! JSONEncoder().encode(macColorsCSS + pageLayoutCSS), as: UTF8.self)));
           document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
         }
         """
