@@ -105,7 +105,9 @@ final class QuickChatController: NSObject {
             case .success:
                 NSSound.beep()
             case .failure(let error):
-                self.log.error("Thinking effort: \(error.localizedDescription, privacy: .public)")
+                // A thrown Error's message is in the userInfo; the description just says "exception".
+                let message = (error as NSError).userInfo["WKJavaScriptExceptionMessage"] as? String
+                self.log.error("Thinking effort: \(message ?? error.localizedDescription, privacy: .public)")
                 NSSound.beep()
             }
         }
@@ -114,23 +116,26 @@ final class QuickChatController: NSObject {
     /// The effort slider sits in the composer's model picker menu ("Power"; Left/Right arrow keys
     /// adjust it, as the menu item's aria-keyshortcuts says). Opens the menu if needed, steps the
     /// slider, closes the menu again and puts focus back in the composer. Returns the new level
-    /// ("High, 3 of 5."), or null if it didn't change. Depends on chatgpt.com's markup.
+    /// ("High, 3 of 5."), or null if it didn't change. Only rendered elements count: after a new
+    /// chat the page keeps the previous chat's composer around, hidden, ahead of the new one.
+    /// Depends on chatgpt.com's markup.
     private static let stepEffortScript = """
         const sleep = ms => new Promise(r => setTimeout(r, ms));
-        const findSlider = () => document.querySelector('[role="menu"] [role="menuitem"][aria-keyshortcuts~="ArrowRight"]');
+        const shown = selector => [...document.querySelectorAll(selector)].filter(e => e.getClientRects().length);
+        const findSlider = () => shown('[role="menu"] [role="menuitem"][aria-keyshortcuts~="ArrowRight"]')[0];
         const level = slider => slider.closest('[role="menu"]').querySelector('[role="status"]')?.textContent;
         const press = (el, key) => el.dispatchEvent(new KeyboardEvent("keydown", {key, code: key, bubbles: true, cancelable: true}));
         let slider = findSlider();
         const opened = !slider;
         if (opened) {
-          const trigger = document.querySelector('form button[aria-label="Select ChatGPT model"]')
-            ?? [...document.querySelectorAll('form button[aria-haspopup="menu"]')].pop();
+          const trigger = shown('form button[aria-label="Select ChatGPT model"]')[0]
+            ?? shown('form button[aria-haspopup="menu"]').pop();
           if (!trigger) throw new Error("no model picker in the composer");
           // Radix menus open on pointerdown, not click.
           trigger.dispatchEvent(new PointerEvent("pointerdown", {bubbles: true, cancelable: true, button: 0, pointerType: "mouse", isPrimary: true}));
           for (let i = 0; i < 20 && !(slider = findSlider()); i++) await sleep(25);
           if (!slider) {
-            const menu = document.querySelector('[role="menu"]');
+            const menu = shown('[role="menu"]')[0];
             if (menu) press(menu, "Escape");
             throw new Error("no effort slider in the model picker");
           }
