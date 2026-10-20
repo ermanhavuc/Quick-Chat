@@ -58,6 +58,31 @@ final class QuickChatController: NSObject {
         if let next { pageZoom = next } else { NSSound.beep() }
     }
 
+    /// ⌘N / ⇧⌘N: a new chat, or a new temporary chat (chatgpt.com's `?temporary-chat=true`).
+    /// Like chatgpt.com's own New chat, it stays in the current Chat or Work mode; a temporary
+    /// chat is always Chat.
+    func newChat(temporary: Bool) {
+        let path = temporary ? "/?temporary-chat=true" : "/"
+        webView?.callAsyncJavaScript(Self.newChatScript, arguments: ["path": path, "composer": Self.composerSelector],
+                                     in: nil, in: .page) { [weak self] result in
+            guard case .failure(let error) = result, let self else { return }
+            self.log.error("New chat: \(error.localizedDescription, privacy: .public)")
+            self.webView?.load(URLRequest(url: URL(string: path, relativeTo: Self.chatURL)!))
+        }
+    }
+
+    /// Goes to `path` through chatgpt.com's own router (pushState plus the popstate event that
+    /// Back/Forward fire), which is quicker than reloading the app. Reloads when already there,
+    /// so the chat still starts fresh, and loads chatgpt.com when on another site (sign-in).
+    private static let newChatScript = """
+        if (location.host !== "chatgpt.com") { location.href = "https://chatgpt.com" + path; return; }
+        if (location.pathname + location.search === path) { location.reload(); return; }
+        history.pushState(null, "", path);
+        dispatchEvent(new PopStateEvent("popstate", {state: null}));
+        await new Promise(r => setTimeout(r, 300));
+        document.querySelector(composer)?.focus();
+        """
+
     /// Set while `stepEffort` runs, so a held ⌘] can't open and close the picker over itself.
     private var isSteppingEffort = false
 
@@ -174,6 +199,7 @@ final class QuickChatController: NSObject {
         panel.onCancel = { [weak self] in self?.hide(restoreFocus: true) }
         panel.onZoom = { [weak self] in self?.zoom($0) }
         panel.onEffort = { [weak self] in self?.stepEffort($0) }
+        panel.onNewChat = { [weak self] in self?.newChat(temporary: $0) }
         panel.resetSizeShortcut = resetSizeShortcut
         panel.maximizeShortcut = maximizeShortcut
 
@@ -427,6 +453,8 @@ final class QuickChatPanel: NSPanel {
     var onZoom: ((Int) -> Void)?
     /// ⌘[ / ⌘]: thinking effort one level down (-1) or up (+1).
     var onEffort: ((Int) -> Void)?
+    /// ⌘N / ⇧⌘N: new chat; `true` for a temporary one.
+    var onNewChat: ((Bool) -> Void)?
     /// Local key combo that calls `resetSize()` while the panel is key (default ⌘O).
     var resetSizeShortcut: Shortcut? = .commandO
     /// Local key combo that calls `toggleMaximize()` while the panel is key (default ⌘F).
@@ -555,14 +583,22 @@ final class QuickChatPanel: NSPanel {
 
     override func close() { onCancel?() }
 
-    /// ⌘W hides, ⌘− / ⌘= / ⌘0 zoom and ⌘[ / ⌘] change the thinking effort; the local shortcuts
-    /// are caught here too, ahead of the web view (which otherwise claims ⌘ combos).
+    /// ⌘W hides, ⌘N / ⇧⌘N start a (temporary) chat, ⌘− / ⌘= / ⌘0 zoom and ⌘[ / ⌘] change the
+    /// thinking effort; the local shortcuts are caught here too, ahead of the web view (which
+    /// otherwise claims ⌘ combos).
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if handleLocalShortcut(event) { return true }
         if event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
            event.charactersIgnoringModifiers == "w" {
             onCancel?()
             return true
+        }
+        if event.charactersIgnoringModifiers?.lowercased() == "n" {
+            let flags = event.modifierFlags.intersection([.shift, .control, .option, .command])
+            if flags == .command || flags == [.command, .shift] {
+                onNewChat?(flags.contains(.shift))
+                return true
+            }
         }
         // Matched by character, Shift allowed, so layouts with a shifted = or + work too.
         if event.modifierFlags.intersection([.control, .option, .command]) == .command {

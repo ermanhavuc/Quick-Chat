@@ -82,6 +82,14 @@ enum PanelSelfTest {
         _ = press("]", [.command, .control])
         check(steps == [-1, 1], "⌘[ → down, ⌘] → up; plain [ and ⌃⌘] ignored", "\(steps)")
 
+        print("5. ⌘N / ⇧⌘N start a new (temporary) chat")
+        var newChats: [Bool] = []
+        panel.onNewChat = { newChats.append($0) }
+        check(press("n") && press("N", [.command, .shift]), "⌘N and ⇧⌘N handled")
+        _ = press("n", [])
+        _ = press("n", [.command, .option])
+        check(newChats == [false, true], "⌘N → new chat, ⇧⌘N → temporary; plain n and ⌥⌘N ignored", "\(newChats)")
+
         print(failures == 0 ? "panel self-test: ALL PASSED" : "panel self-test: \(failures) FAILED")
         return failures == 0
     }
