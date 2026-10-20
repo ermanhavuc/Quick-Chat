@@ -1,4 +1,5 @@
 import AppKit
+import ServiceManagement
 
 /// Builds the status-item menu. Rebuilt every time it opens so feature state/status stay fresh.
 ///
@@ -53,8 +54,26 @@ final class MenuController: NSObject, NSMenuDelegate {
         }
 
         menu.addItem(.separator())
+        let launchAtLogin = ActionMenuItem("Launch at Login") { [weak self] in self?.toggleLaunchAtLogin() }
+        launchAtLogin.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        menu.addItem(launchAtLogin)
         menu.addItem(NSMenuItem(title: "Quit Quick Chat",
                                 action: #selector(NSApplication.terminate(_:)),
                                 keyEquivalent: ""))
+    }
+
+    /// Adds Quick Chat to, or removes it from, macOS's login items. If macOS wants the user to
+    /// approve it first (e.g. it was switched off in System Settings), opens Login Items there.
+    private func toggleLaunchAtLogin() {
+        let service = SMAppService.mainApp
+        do {
+            if service.status == .enabled { try service.unregister() } else { try service.register() }
+            Log.app.info("Launch at Login: \(service.status == .enabled ? "on" : "off", privacy: .public)")
+        } catch {
+            Log.app.error("Launch at Login: \(error.localizedDescription, privacy: .public)")
+            NSApp.activate()
+            NSAlert(error: error).runModal()
+        }
+        if service.status == .requiresApproval { SMAppService.openSystemSettingsLoginItems() }
     }
 }

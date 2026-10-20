@@ -10,6 +10,8 @@ struct Shortcut: Codable, Equatable {
     var keyLabel: String?
 
     static let optionSpace = Shortcut(keyCode: UInt32(kVK_Space), carbonModifiers: UInt32(optionKey))
+    /// Default global shortcut for Ask About Selection.
+    static let optionShiftSpace = Shortcut(keyCode: UInt32(kVK_Space), carbonModifiers: UInt32(optionKey | shiftKey))
     /// Default local shortcut for resetting the Quick Chat panel's size.
     static let commandO = Shortcut(keyCode: UInt32(kVK_ANSI_O), carbonModifiers: UInt32(cmdKey), keyLabel: "O")
     /// Default local shortcut for maximizing / restoring the Quick Chat panel.
@@ -124,6 +126,7 @@ struct Shortcut: Codable, Equatable {
     // MARK: Persistence
 
     private static let defaultsKey = "miniChat.shortcut" // pre-rename key; persisted, keep
+    private static let askDefaultsKey = "quickChat.askShortcut"
     /// Local (panel-focused) shortcut for Reset Size & Position.
     private static let resetSizeDefaultsKey = "quickChat.resetSizeShortcut"
     /// Local (panel-focused) shortcut for Maximize / Restore Size.
@@ -132,6 +135,10 @@ struct Shortcut: Codable, Equatable {
     /// The global Quick Chat toggle shortcut.
     static func load() -> Shortcut { load(key: defaultsKey, fallback: .optionSpace) }
     func save() { save(key: Self.defaultsKey) }
+
+    /// The global Ask About Selection shortcut.
+    static func loadAsk() -> Shortcut { load(key: askDefaultsKey, fallback: .optionShiftSpace) }
+    func saveAsAsk() { save(key: Self.askDefaultsKey) }
 
     /// The Reset Size & Position shortcut (works only while the Quick Chat panel is focused).
     static func loadResetSize() -> Shortcut { load(key: resetSizeDefaultsKey, fallback: .commandO) }

@@ -62,6 +62,22 @@ final class QuickChatController: NSObject {
         if let next { pageZoom = next } else { NSSound.beep() }
     }
 
+    static let hidesTopBarDefaultsKey = "quickChat.hidesTopBar"
+
+    /// Whether chatgpt.com's top bar is hidden (see `hideTopBarCSS`); it is by default. Remembered
+    /// across launches.
+    private(set) var hidesTopBar = UserDefaults.standard.object(forKey: hidesTopBarDefaultsKey) as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(hidesTopBar, forKey: Self.hidesTopBarDefaultsKey)
+            guard let webView else { return }
+            addUserScripts(to: webView.configuration.userContentController) // for the next page loads
+            webView.evaluateJavaScript(Self.topBarScript(hidden: hidesTopBar))
+        }
+    }
+
+    /// ⌘\: shows or hides chatgpt.com's top bar.
+    func toggleTopBar() { hidesTopBar.toggle() }
+
     /// ⌘N / ⇧⌘N: a new chat, or a new temporary chat (chatgpt.com's `?temporary-chat=true`).
     /// Like chatgpt.com's own New chat, it stays in the current Chat or Work mode; a temporary
     /// chat is always Chat.
@@ -85,6 +101,60 @@ final class QuickChatController: NSObject {
         dispatchEvent(new PopStateEvent("popstate", {state: null}));
         await new Promise(r => setTimeout(r, 300));
         \(focusComposerScript)
+        """
+
+    /// Text for `ask(about:)` that waits for the page to finish loading.
+    private var pendingQuestion: String?
+
+    /// Shows the panel with a new chat that has `text` in its message box (after anything
+    /// already typed there), ready for a question about it.
+    func ask(about text: String) {
+        show()
+        guard let webView else { return }
+        if webView.isLoading { pendingQuestion = text } else { insertQuestion(text) }
+    }
+
+    private func insertQuestion(_ text: String) {
+        webView?.callAsyncJavaScript(Self.askScript, arguments: ["text": text], in: nil, in: .page) { [weak self] result in
+            guard case .failure(let error) = result, let self else { return }
+            let message = (error as NSError).userInfo["WKJavaScriptExceptionMessage"] as? String
+            self.log.error("Ask about selection: \(message ?? error.localizedDescription, privacy: .public)")
+            NSSound.beep()
+        }
+    }
+
+    /// Opens a new chat like `newChatScript`, but never reloads, which would drop the text. Then
+    /// pastes `text` into the message box as if with ⌘V (so a long text becomes an attachment, as
+    /// chatgpt.com does with pastes), followed by an empty line for the question. Waits (up to
+    /// 5 s) for the new chat's message box: the previous one stays in the page, hidden, and may
+    /// still show for a moment; it's never written to.
+    private static let askScript = """
+        const sleep = ms => new Promise(r => setTimeout(r, ms));
+        const messageBox = () => [...document.querySelectorAll('#prompt-textarea, form [contenteditable="true"]')]
+          .find(e => e.getClientRects().length);
+        if (location.hostname !== "chatgpt.com") throw new Error("not on chatgpt.com");
+        const previous = location.pathname + location.search === "/" ? null : messageBox();
+        if (previous !== null) {
+          history.pushState(null, "", "/");
+          dispatchEvent(new PopStateEvent("popstate", {state: null}));
+        }
+        let box;
+        for (let i = 0; i < 100 && !((box = messageBox()) && box !== previous); i++) await sleep(50);
+        if (!box || box === previous) throw new Error("no message box in the new chat");
+        box.focus();
+        const end = document.createRange();
+        end.selectNodeContents(box);
+        end.collapse(false);
+        getSelection().removeAllRanges();
+        getSelection().addRange(end);
+        await sleep(50);
+        const lines = text.replace(/^\\s*\\n|\\n\\s*$/g, ""); // no blank lines around it; indentation stays
+        const paste = (box.innerText.trim() ? "\\n\\n" : "") + lines + "\\n\\n";
+        const data = new DataTransfer();
+        data.setData("text/plain", paste);
+        if (box.dispatchEvent(new ClipboardEvent("paste", {clipboardData: data, bubbles: true, cancelable: true}))) {
+          document.execCommand("insertText", false, paste); // the page ignored the paste
+        }
         """
 
     /// Set while `stepEffort` runs, so a held ⌘] can't open and close the picker over itself.
@@ -209,6 +279,7 @@ final class QuickChatController: NSObject {
         panel.onZoom = { [weak self] in self?.zoom($0) }
         panel.onEffort = { [weak self] in self?.stepEffort($0) }
         panel.onNewChat = { [weak self] in self?.newChat(temporary: $0) }
+        panel.onToggleTopBar = { [weak self] in self?.toggleTopBar() }
         panel.resetSizeShortcut = resetSizeShortcut
         panel.maximizeShortcut = maximizeShortcut
 
@@ -263,8 +334,7 @@ final class QuickChatController: NSObject {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default()
         config.mediaTypesRequiringUserActionForPlayback = []
-        config.userContentController.addUserScript(WKUserScript(source: Self.pageStyleScript,
-                                                                injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        addUserScripts(to: config.userContentController)
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.customUserAgent = Self.safariUserAgent
         webView.pageZoom = pageZoom
@@ -273,6 +343,15 @@ final class QuickChatController: NSObject {
         webView.allowsBackForwardNavigationGestures = true
         webView.underPageBackgroundColor = .windowBackgroundColor
         return webView
+    }
+
+    /// The page touch-ups, run at the start of every chatgpt.com page load. Replaces the earlier
+    /// ones, so `hidesTopBar` changes reach the next load.
+    private func addUserScripts(to controller: WKUserContentController) {
+        controller.removeAllUserScripts()
+        for source in [Self.pageStyleScript, Self.topBarScript(hidden: hidesTopBar)] {
+            controller.addUserScript(WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        }
     }
 
     /// Focuses chatgpt.com's message box: once a contenteditable #prompt-textarea, now an unnamed
@@ -332,15 +411,33 @@ final class QuickChatController: NSObject {
         [class*="transcriptContent-"] > [class~="pb-5"] { padding-bottom: 10px; }
         """
 
-    /// Adds `macColorsCSS` and `pageLayoutCSS` as a constructed style sheet, which survives the
-    /// page re-rendering its own DOM. Its rules aren't in a cascade layer, so they beat chatgpt.com's.
+    /// While `hidesTopBar` is on (the root element has `data-quick-chat-hide-top-bar`), the top
+    /// bar is gone: its sidebar button (⇧⌘S does the same), Chat/Work switch, temporary chat
+    /// button (⇧⌘N), and in a chat its New chat, Share and More buttons. The content frame's
+    /// margin that made room for the bar goes too, so a chat scrolls to the panel's top edge.
+    /// Pages without this bar, like the signed-out page with its Log in button, are unaffected.
+    private static let hideTopBarCSS = """
+        [data-quick-chat-hide-top-bar] main > header.draggable { display: none; }
+        [data-quick-chat-hide-top-bar] main:has(> header.draggable) [class*="MainContentFrame-"] {
+          --app-shell-main-content-frame-top-offset: 0px;
+        }
+        """
+
+    /// Adds `macColorsCSS`, `pageLayoutCSS` and `hideTopBarCSS` as a constructed style sheet,
+    /// which survives the page re-rendering its own DOM. Its rules aren't in a cascade layer, so
+    /// they beat chatgpt.com's.
     private static let pageStyleScript = """
         if (location.hostname === "chatgpt.com") {
           const sheet = new CSSStyleSheet();
-          sheet.replaceSync(\(String(decoding: try! JSONEncoder().encode(macColorsCSS + pageLayoutCSS), as: UTF8.self)));
+          sheet.replaceSync(\(String(decoding: try! JSONEncoder().encode(macColorsCSS + pageLayoutCSS + hideTopBarCSS), as: UTF8.self)));
           document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
         }
         """
+
+    /// Turns `hideTopBarCSS` on or off for the page.
+    private static func topBarScript(hidden: Bool) -> String {
+        #"if (location.hostname === "chatgpt.com") document.documentElement.toggleAttribute("data-quick-chat-hide-top-bar", \#(hidden));"#
+    }
 
     /// chatgpt.com or a subdomain of it (not e.g. "notchatgpt.com").
     private static func isChatGPTHost(_ host: String) -> Bool {
@@ -456,8 +553,17 @@ extension QuickChatController: WKUIDelegate, WKNavigationDelegate, WKDownloadDel
         download.delegate = self
     }
 
+    /// Popups share the panel's page scripts but not its ⌘\, so they keep chatgpt.com's top bar.
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        if webView !== self.webView { webView.evaluateJavaScript(Self.topBarScript(hidden: false)) }
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         focusComposer()
+        if webView === self.webView, let text = pendingQuestion {
+            pendingQuestion = nil
+            insertQuestion(text)
+        }
     }
 
     /// macOS may kill the web content process (often while hidden, under memory pressure), which
@@ -527,6 +633,8 @@ final class QuickChatPanel: NSPanel {
     var onEffort: ((Int) -> Void)?
     /// ⌘N / ⇧⌘N: new chat; `true` for a temporary one.
     var onNewChat: ((Bool) -> Void)?
+    /// ⌘\: show or hide chatgpt.com's top bar.
+    var onToggleTopBar: (() -> Void)?
     /// Local key combo that calls `resetSize()` while the panel is key (default ⌘O).
     var resetSizeShortcut: Shortcut? = .commandO
     /// Local key combo that calls `toggleMaximize()` while the panel is key (default ⌘F).
@@ -659,9 +767,9 @@ final class QuickChatPanel: NSPanel {
 
     override func close() { onCancel?() }
 
-    /// ⌘W hides, ⌘N / ⇧⌘N start a (temporary) chat, ⌘− / ⌘= / ⌘0 zoom and ⌘[ / ⌘] change the
-    /// thinking effort; the local shortcuts are caught here too, ahead of the web view (which
-    /// otherwise claims ⌘ combos).
+    /// ⌘W hides, ⌘N / ⇧⌘N start a (temporary) chat, ⌘− / ⌘= / ⌘0 zoom, ⌘[ / ⌘] change the
+    /// thinking effort and ⌘\ shows or hides the top bar; the local shortcuts are caught here
+    /// too, ahead of the web view (which otherwise claims ⌘ combos).
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if handleLocalShortcut(event) { return true }
         if event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
@@ -669,12 +777,14 @@ final class QuickChatPanel: NSPanel {
             onCancel?()
             return true
         }
-        if event.charactersIgnoringModifiers?.lowercased() == "n" {
-            let flags = event.modifierFlags.intersection([.shift, .control, .option, .command])
-            if flags == .command || flags == [.command, .shift] {
-                onNewChat?(flags.contains(.shift))
-                return true
-            }
+        let flags = event.modifierFlags.intersection([.shift, .control, .option, .command])
+        if event.charactersIgnoringModifiers?.lowercased() == "n", flags == .command || flags == [.command, .shift] {
+            onNewChat?(flags.contains(.shift))
+            return true
+        }
+        if flags == .command, event.charactersIgnoringModifiers == "\\" {
+            onToggleTopBar?()
+            return true
         }
         // Matched by character, Shift allowed, so layouts with a shifted = or + work too.
         if event.modifierFlags.intersection([.control, .option, .command]) == .command {

@@ -13,10 +13,11 @@ enum PanelSelfTest {
     }
 
     static func run() -> Bool {
-        // Start from the default zoom and no saved panel frame; put the saved ones back afterwards.
+        // Start from the default zoom and top bar and no saved panel frame; put the saved ones
+        // back afterwards.
         let defaults = UserDefaults.standard, zoomKey = QuickChatController.pageZoomDefaultsKey
-        let frameKey = "NSWindow Frame \(QuickChatPanel.autosaveName)"
-        let saved = [zoomKey, frameKey].map { ($0, defaults.object(forKey: $0)) }
+        let frameKey = "NSWindow Frame \(QuickChatPanel.autosaveName)", topBarKey = QuickChatController.hidesTopBarDefaultsKey
+        let saved = [zoomKey, frameKey, topBarKey].map { ($0, defaults.object(forKey: $0)) }
         for (key, _) in saved { defaults.removeObject(forKey: key) }
         defer { for (key, value) in saved { defaults.set(value, forKey: key) } }
 
@@ -117,6 +118,47 @@ enum PanelSelfTest {
                          "https://example.com/", "http://example.com/", "mailto:someone@example.com"]
         for link in inApp { check(QuickChatController.opensInApp(URL(string: link)), "in app: \(link)") }
         for link in inBrowser { check(!QuickChatController.opensInApp(URL(string: link)), "browser: \(link)") }
+
+        print("8. ⌘\\ shows or hides chatgpt.com's top bar, remembered")
+        func topBar(hidden: Bool, _ name: String) {
+            let scripts = webView.configuration.userContentController.userScripts.map(\.source)
+            let flag = scripts.first { $0.contains("toggleAttribute(\"data-quick-chat-hide-top-bar\"") }
+            let saved = defaults.object(forKey: topBarKey) as? Bool ?? true // nothing saved yet: the default
+            check(chat.hidesTopBar == hidden && saved == hidden && scripts.count == 2
+                  && flag?.hasSuffix(", \(hidden));") == true, name, "\(scripts.count) scripts, flag: \(flag ?? "none")")
+        }
+        topBar(hidden: true, "hidden by default")
+        check(press("\\"), "⌘\\ handled")
+        topBar(hidden: false, "⌘\\ → shown (next page loads too)")
+        _ = press("\\")
+        topBar(hidden: true, "⌘\\ again → hidden")
+        _ = press("\\", [])
+        _ = press("\\", [.command, .option])
+        topBar(hidden: true, "plain \\ and ⌥⌘\\ ignored")
+
+        print("9. Ask About Selection puts the clipboard back as it was")
+        let board = NSPasteboard(name: .init("QuickChat.SelfTest"))
+        defer { board.releaseGlobally() }
+        let custom = NSPasteboard.PasteboardType("dev.shuaibird.quickchat.test")
+        let first = NSPasteboardItem(), second = NSPasteboardItem()
+        first.setString("<b>rich</b>", forType: .html)
+        first.setString("rich", forType: .string)
+        second.setData(Data([0, 1, 2, 255]), forType: custom)
+        board.clearContents()
+        board.writeObjects([first, second])
+        let snapshot = PasteboardSnapshot(board)
+        board.clearContents()
+        board.setString("the selection", forType: .string) // what ⌘C put there
+        snapshot.restore(to: board)
+        let items = board.pasteboardItems ?? []
+        check(items.count == 2 && items[0].types == [.html, .string] && items[0].string(forType: .html) == "<b>rich</b>"
+              && items[0].string(forType: .string) == "rich" && items[1].data(forType: custom) == Data([0, 1, 2, 255]),
+              "both items, every type in order, same data", "\(items.map(\.types))")
+        board.clearContents()
+        let empty = PasteboardSnapshot(board)
+        board.setString("the selection", forType: .string)
+        empty.restore(to: board)
+        check(board.pasteboardItems?.isEmpty != false, "an empty clipboard stays empty", "\(board.pasteboardItems?.map(\.types) ?? [])")
 
         print(failures == 0 ? "panel self-test: ALL PASSED" : "panel self-test: \(failures) FAILED")
         return failures == 0

@@ -178,8 +178,11 @@ Tell the user:
    never restarts ChatGPT on its own. Quitting Quick Chat restores the original shortcut.
 6. The first time the user speaks to ChatGPT, macOS asks for microphone access. Allow it.
 
-To launch it at login: **System Settings → General → Login Items → Open at Login → +**, then
-choose Quick Chat.
+To launch it at login, choose **Launch at Login** in its menu.
+
+To ask about text from another app, select it and press **⌥⇧Space**. The first time, macOS asks
+for Accessibility access (Quick Chat presses ⌘C to copy the selection): allow Quick Chat in
+**System Settings → Privacy & Security → Accessibility**, then press ⌥⇧Space again.
 
 ---
 
@@ -195,6 +198,7 @@ choose Quick Chat.
 | `UNIVERSAL=1 make` fails | Universal builds need full Xcode, and a normal `make` is fine for one Mac. |
 | `swift: command not found` / `xcrun: error: invalid active developer path` | Developer tools are missing; see B1. |
 | Microphone or camera keeps being asked for after an update | Expected for ad-hoc-signed builds. To clear stale entries: `tccutil reset Microphone dev.shuaibird.quickchat` and `tccutil reset Camera dev.shuaibird.quickchat`. |
+| ⌥⇧Space does nothing, or opens the panel without the selected text | Quick Chat lacks Accessibility access, or (after an update of an ad-hoc-signed build) its entry is stale. Run `tccutil reset Accessibility dev.shuaibird.quickchat`, press ⌥⇧Space, and allow Quick Chat when macOS asks. Some apps can't copy their selection; then it opens the panel without text. |
 | Want to remove it | Quit from the menu (this restores ChatGPT's shortcut), then delete `/Applications/Quick Chat.app` (or `make uninstall` in a clone). To also clear settings: `defaults delete dev.shuaibird.quickchat` and `rm -rf ~/Library/Application\ Support/ChatGPTCompanion`. |
 
 For anything else, point the user to the

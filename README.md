@@ -33,16 +33,18 @@ Quick Chat fills the gap the simple way: it shows chatgpt.com in a small floatin
 
 ## What it does
 
-Two features, both off until you turn them on from the menu-bar icon. Your choices are remembered.
+Two features, both off until you turn them on from the menu-bar icon. Your choices are remembered. **Launch at Login**, in the same menu, starts Quick Chat when you log in.
 
 ### Quick Chat
 
 - A global shortcut (⌥Space by default; change it with **Change Shortcut…**) toggles a floating panel with chatgpt.com inside.
 - The panel opens at the bottom center of the screen, just above the Dock, at 420×560, so chatgpt.com uses its compact layout. It is resizable and movable; the size and position are remembered. It has no title bar, so chatgpt.com fills it to the top edge; ⌃⌘-drag anywhere in it to move it. ⌘F maximizes the panel to fill the screen, leaving the menu bar and Dock visible, and restores your size on a second press. ⌘O puts it back at the bottom center at the default size.
 - The page is zoomed to 90% by default, so text is a little smaller than on chatgpt.com. ⌘− and ⌘= (or ⌘+) zoom out and in, ⌘0 goes back to 90%, and your zoom is remembered.
+- chatgpt.com's top bar (sidebar button, Chat/Work switch, temporary chat, Share) is hidden, so the chat fills the panel. ⌘\ shows or hides it, and your choice is remembered. Its main actions have keys anyway: ⇧⌘S for the sidebar, ⌘N and ⇧⌘N for new and temporary chats.
 - ⌘[ and ⌘] lower and raise the thinking effort (Instant, Medium, High…) without opening the model picker yourself. They step the effort slider in chatgpt.com's model picker, so they need you signed in and stop working if chatgpt.com changes that picker.
 - It stays on top of other windows and doesn't hide when you click elsewhere. The shortcut, Esc or ⌘W hides it.
 - Reopening the panel returns to the conversation you left. Press ⌘N (or chatgpt.com's own ⇧⌘O) for a new chat and ⇧⌘N for a new temporary chat. A new chat stays in the Chat or Work mode you last picked, like chatgpt.com's New chat; a temporary chat is always Chat.
+- **Ask About Selection** (⌥⇧Space by default; change it with **Change Shortcut…**): select text in any app and press it. The panel opens with a new chat that has the text in its message box, followed by an empty line for your question; nothing is sent until you send it. Text already typed on the new-chat page stays, before it. A long selection becomes an attachment, as when you paste it into chatgpt.com. With nothing selected, the shortcut just opens the panel. It copies the selection by pressing ⌘C for you and then puts your clipboard back, so it needs Accessibility access (see [Permissions](#permissions)).
 - Sign in once inside the panel. Sign-in pop-ups, such as Google's "Continue as" card, open in a window of their own that closes when you're done; so do chatgpt.com links that open a new tab. Every other link (sources, websites, openai.com pages, email addresses) opens in your default browser or mail app. **Sign Out of Quick Chat** clears the panel's website data.
 - Voice works; macOS asks for microphone access the first time.
 - It doesn't need the ChatGPT desktop app. If the new app isn't installed, the Show Mini options are simply unavailable and the rest works the same.
@@ -60,7 +62,7 @@ chatgpt.com has built-in keyboard shortcuts, and they all reach the panel. Toget
 | ⇧⌘⌫ | Delete chat |
 | ⌘/ | Show all shortcuts (and change them) |
 
-These come from chatgpt.com's own **Keyboard shortcuts** dialog (⌘/), as of October 2026. Quick Chat only reserves Esc and ⌘W (hide the panel), ⌘N and ⇧⌘N (new chat, new temporary chat), ⌘O (reset the panel's size and position), ⌘F (maximize or restore the panel), ⌘−, ⌘=, ⌘0 (zoom) and ⌘[, ⌘] (thinking effort).
+These come from chatgpt.com's own **Keyboard shortcuts** dialog (⌘/), as of October 2026. Quick Chat only reserves Esc and ⌘W (hide the panel), ⌘N and ⇧⌘N (new chat, new temporary chat), ⌘O (reset the panel's size and position), ⌘F (maximize or restore the panel), ⌘−, ⌘=, ⌘0 (zoom), ⌘[, ⌘] (thinking effort) and ⌘\ (top bar).
 
 ### Disable Show Mini Shortcut
 
@@ -155,8 +157,12 @@ Build options (environment variables for `make` or `scripts/build-app.sh`):
 
 ### Permissions
 
-Quick Chat needs no Accessibility or Automation access. macOS asks for the **microphone**
-the first time you use voice, and for the **camera** if you take a photo or share video.
+Only **Ask About Selection** needs **Accessibility** access: it presses ⌘C in the app you're in
+to copy the selection. The first time you press ⌥⇧Space, macOS asks for it and the panel stays
+closed; allow Quick Chat in **System Settings → Privacy & Security → Accessibility**, then press
+⌥⇧Space again. Nothing else uses this access, and Quick Chat needs no Automation access. macOS
+asks for the **microphone** the first time you use voice, and for the **camera** if you take a
+photo or share video.
 
 Release builds, and local builds without an Apple Development certificate, are signed
 ad-hoc. macOS identifies an ad-hoc app by the hash of its code, so after every update or
@@ -165,7 +171,11 @@ rebuild it treats Quick Chat as a new app and may ask again. To clear stale entr
 ```sh
 tccutil reset Microphone dev.shuaibird.quickchat
 tccutil reset Camera dev.shuaibird.quickchat
+tccutil reset Accessibility dev.shuaibird.quickchat
 ```
+
+A stale Accessibility entry can look switched on in System Settings while ⌥⇧Space does nothing
+or opens the panel without the selected text; reset it as above and allow Quick Chat again.
 
 If you build from source, signing with a free Apple Development certificate
 (Xcode → Settings → Accounts) keeps the grants across rebuilds. The build script picks it
@@ -177,7 +187,7 @@ up automatically.
 - It runs chatgpt.com in a web view, not a native ChatGPT client. You sign in separately from any ChatGPT app.
 - Google sign-in works only because the panel identifies itself as Safari. Google blocks sign-in from embedded web views and may detect this at any time. Email, Apple or Microsoft sign-in avoid that risk.
 - You get the website's interface, not Classic's native chat UI. Your chats are regular ChatGPT conversations in your web history.
-- Quick Chat touches up chatgpt.com's browser layout: the page uses macOS's own background colors (following ChatGPT's Light/Dark theme; your ChatGPT accent color is kept), the space under the message box matches its sides, the "ChatGPT can make mistakes" line under a chat and the "For safety…" notice under a temporary chat's message box are hidden (leaving the same space between the last message and the message box), and the top bar gets a solid background so a scrolled chat doesn't show through behind its buttons. When chatgpt.com changes, these touch-ups, the compact layout, focusing the message box or ⌘[ / ⌘] can break.
+- Quick Chat touches up chatgpt.com's browser layout: the page uses macOS's own background colors (following ChatGPT's Light/Dark theme; your ChatGPT accent color is kept), the space under the message box matches its sides, the "ChatGPT can make mistakes" line under a chat and the "For safety…" notice under a temporary chat's message box are hidden (leaving the same space between the last message and the message box), the top bar gets a solid background so a scrolled chat doesn't show through behind its buttons, and is hidden unless you show it with ⌘\. When chatgpt.com changes, these touch-ups, the compact layout, focusing the message box or ⌘[ / ⌘] can break.
 
 **Downloads and camera.** Files you download (generated images, exports) are saved straight to ~/Downloads and shown in Finder. Camera capture asks for macOS camera access the first time. Some cases may still fail, such as the right-click "Download Image" item, and `alert()`/`confirm()` dialogs from the site aren't shown.
 
@@ -193,6 +203,7 @@ up automatically.
 
 - Quick Chat has no servers, analytics or telemetry. The panel talks only to chatgpt.com and the sign-in provider you choose; other links open in your default browser.
 - Your sign-in session is stored locally in the app's web data. **Sign Out of Quick Chat** deletes it.
+- Ask About Selection briefly keeps a copy of your clipboard in memory, presses ⌘C for you, reads the selection and puts your clipboard back. The selection only goes into the message box. Clipboard managers may still record the copy, and an app that takes over a second to copy leaves the selection on the clipboard.
 - Nothing inside the ChatGPT app bundle is modified. The only file Quick Chat changes is the ChatGPT app's own `keybindings.json`, and it restores that file when you turn the features off or quit.
 
 ## Not affiliated with OpenAI

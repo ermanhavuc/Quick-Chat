@@ -1,12 +1,13 @@
 import AppKit
 
-/// Small window for choosing Quick Chat's shortcuts: the global toggle and the local
-/// (panel-focused) Reset Size & Position and Maximize. The caller unregisters its global hotkey while this is
-/// open (otherwise the current shortcut would be swallowed).
+/// Small window for choosing Quick Chat's shortcuts: the global toggle and Ask About Selection,
+/// and the local (panel-focused) Reset Size & Position and Maximize. The caller unregisters its
+/// global hotkeys while this is open (otherwise the current shortcuts would be swallowed).
 @MainActor
 final class ShortcutRecorderWindow: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private let recorder = RecorderField()
+    private let askRecorder = RecorderField()
     private let resetSizeRecorder = RecorderField()
     private let maximizeRecorder = RecorderField()
     private let hint = NSTextField(wrappingLabelWithString: "")
@@ -15,26 +16,32 @@ final class ShortcutRecorderWindow: NSObject, NSWindowDelegate {
     private let rules = NSTextField(wrappingLabelWithString: Shortcut.rulesText)
     private var rulesResetToken = 0
     private var onChange: ((Shortcut) -> Void)?
+    private var onAskChange: ((Shortcut) -> Void)?
     private var onResetSizeChange: ((Shortcut) -> Void)?
     private var onMaximizeChange: ((Shortcut) -> Void)?
     private var onClose: (() -> Void)?
 
     /// `miniShortcut`: Show Mini's current shortcut, shown as a hint (picking it turns Show Mini off).
-    /// `resetSize`, `maximize`: the current local shortcuts. All three shortcuts stay distinct.
-    func show(current: Shortcut, resetSize: Shortcut, maximize: Shortcut, miniShortcut: String?,
+    /// `ask`: the current Ask About Selection shortcut. `resetSize`, `maximize`: the current local
+    /// shortcuts. All four shortcuts stay distinct.
+    func show(current: Shortcut, ask: Shortcut, resetSize: Shortcut, maximize: Shortcut, miniShortcut: String?,
               onChange: @escaping (Shortcut) -> Void,
+              onAskChange: @escaping (Shortcut) -> Void,
               onResetSizeChange: @escaping (Shortcut) -> Void,
               onMaximizeChange: @escaping (Shortcut) -> Void,
               onClose: @escaping () -> Void) {
         self.onChange = onChange
+        self.onAskChange = onAskChange
         self.onResetSizeChange = onResetSizeChange
         self.onMaximizeChange = onMaximizeChange
         self.onClose = onClose
         recorder.shortcut = current
+        askRecorder.shortcut = ask
         resetSizeRecorder.shortcut = resetSize
         maximizeRecorder.shortcut = maximize
         let fields: [(RecorderField, (Shortcut) -> Void)] = [
             (recorder, { [weak self] in self?.onChange?($0) }),
+            (askRecorder, { [weak self] in self?.onAskChange?($0) }),
             (resetSizeRecorder, { [weak self] in self?.onResetSizeChange?($0) }),
             (maximizeRecorder, { [weak self] in self?.onMaximizeChange?($0) }),
         ]
@@ -63,10 +70,11 @@ final class ShortcutRecorderWindow: NSObject, NSWindowDelegate {
 
     func close() { window?.close() }
 
-    /// Why `new` can't go in `field`: another of the three fields already has it.
+    /// Why `new` can't go in `field`: another of the four fields already has it.
     private func conflict(_ new: Shortcut, for field: RecorderField) -> String? {
         let names: [(RecorderField, String)] = [
-            (recorder, "the Quick Chat shortcut"), (resetSizeRecorder, "Reset Size & Position"), (maximizeRecorder, "Maximize"),
+            (recorder, "the Quick Chat shortcut"), (askRecorder, "Ask About Selection"),
+            (resetSizeRecorder, "Reset Size & Position"), (maximizeRecorder, "Maximize"),
         ]
         guard let name = names.first(where: { $0.0 !== field && $0.0.shortcut == new })?.1 else { return nil }
         return "\(new.displayString) is already \(name).\nPick another combo, or change that one first."
@@ -83,6 +91,9 @@ final class ShortcutRecorderWindow: NSObject, NSWindowDelegate {
         let label = Self.sectionLabel("Quick Chat", detail: "Opens Quick Chat from any app.")
         let reset = NSButton(title: "Reset to ⌥Space", target: self, action: #selector(resetToDefault))
         let row = NSStackView(views: [recorder, reset])
+        let askLabel = Self.sectionLabel("Ask About Selection", detail: "Opens a new chat with the selected text.")
+        let askReset = NSButton(title: "Reset to ⌥⇧Space", target: self, action: #selector(resetAskToDefault))
+        let askRow = NSStackView(views: [askRecorder, askReset])
         let resetSizeLabel = Self.sectionLabel("Reset Size & Position",
                                                detail: "Works only while Quick Chat is focused.")
         let resetSizeReset = NSButton(title: "Reset to ⌘O", target: self, action: #selector(resetResetSizeToDefault))
@@ -91,9 +102,9 @@ final class ShortcutRecorderWindow: NSObject, NSWindowDelegate {
                                               detail: "Works only while Quick Chat is focused.")
         let maximizeReset = NSButton(title: "Reset to ⌘F", target: self, action: #selector(resetMaximizeToDefault))
         let maximizeRow = NSStackView(views: [maximizeRecorder, maximizeReset])
-        for button in [reset, resetSizeReset, maximizeReset] {
+        for button in [reset, askReset, resetSizeReset, maximizeReset] {
             button.setContentHuggingPriority(.required, for: .horizontal)
-            button.widthAnchor.constraint(equalToConstant: 120).isActive = true
+            button.widthAnchor.constraint(equalToConstant: 140).isActive = true
         }
         rules.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         hint.textColor = .tertiaryLabelColor
@@ -101,18 +112,19 @@ final class ShortcutRecorderWindow: NSObject, NSWindowDelegate {
         let done = NSButton(title: "Done", target: self, action: #selector(finish))
         done.keyEquivalent = "\r"
         let buttons = NSStackView(views: [NSView(), done])
-        let stack = NSStackView(views: [label, row, hint, resetSizeLabel, resetSizeRow,
+        let stack = NSStackView(views: [label, row, hint, askLabel, askRow, resetSizeLabel, resetSizeRow,
                                         maximizeLabel, maximizeRow, rules, buttons])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 12
         stack.setCustomSpacing(6, after: row)
         stack.setCustomSpacing(18, after: hint)
+        stack.setCustomSpacing(18, after: askRow)
         stack.setCustomSpacing(18, after: resetSizeRow)
         stack.setCustomSpacing(18, after: maximizeRow)
         stack.edgeInsets = NSEdgeInsets(top: 16, left: 20, bottom: 16, right: 20)
         row.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -40).isActive = true
-        for view in [resetSizeRow, maximizeRow, rules, hint, buttons] {
+        for view in [askRow, resetSizeRow, maximizeRow, rules, hint, buttons] {
             view.widthAnchor.constraint(equalTo: row.widthAnchor).isActive = true
         }
         // Wrap at a fixed width so the fitted height is deterministic.
@@ -159,6 +171,13 @@ final class ShortcutRecorderWindow: NSObject, NSWindowDelegate {
         showRules()
         recorder.shortcut = .optionSpace
         onChange?(.optionSpace)
+    }
+
+    @objc private func resetAskToDefault() {
+        if let reason = askRecorder.validate?(.optionShiftSpace) { return showRejection(reason) }
+        showRules()
+        askRecorder.shortcut = .optionShiftSpace
+        onAskChange?(.optionShiftSpace)
     }
 
     @objc private func resetResetSizeToDefault() {
