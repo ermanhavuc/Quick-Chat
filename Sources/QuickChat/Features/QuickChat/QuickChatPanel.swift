@@ -259,7 +259,7 @@ final class QuickChatController: NSObject {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default()
         config.mediaTypesRequiringUserActionForPlayback = []
-        config.userContentController.addUserScript(WKUserScript(source: Self.composerSpacingScript,
+        config.userContentController.addUserScript(WKUserScript(source: Self.pageLayoutScript,
                                                                 injectionTime: .atDocumentStart, forMainFrameOnly: true))
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.customUserAgent = Self.safariUserAgent
@@ -282,25 +282,30 @@ final class QuickChatController: NSObject {
         webView?.evaluateJavaScript(Self.focusComposerScript)
     }
 
-    /// chatgpt.com sizes the gap under its message box for a browser tab: 24px in a chat, and 24px
-    /// plus 16px kept for an (empty) notice on the new-chat page, against 16px at the sides. In
-    /// the panel that shows as a dark strip under the box, so this makes the gap match the sides
-    /// (both follow --thread-body-inline-padding). A notice that has text keeps its space. If
-    /// chatgpt.com renames these hooks, the rules stop matching and the spacing is as before.
-    private static let composerSpacingCSS = """
+    /// Layout fixes for chatgpt.com's browser-tab layout, which shows a bit off in the panel:
+    /// - The gap under the message box is 24px in a chat, and 24px plus 16px kept for an (empty)
+    ///   notice on the new-chat page, against 16px at the sides; it showed as a dark strip under
+    ///   the box. The gap now matches the sides (both follow --thread-body-inline-padding); a
+    ///   notice that has text keeps its space.
+    /// - The top bar is transparent, with only its button groups on pills, so a chat scrolled
+    ///   under it showed through between and around the buttons. It now gets the page's surface
+    ///   color, as the pills have.
+    /// If chatgpt.com renames these hooks, the rules stop matching and the page looks as before.
+    private static let pageLayoutCSS = """
         body, body [data-theme] { --thread-composer-bottom-inset: var(--thread-body-inline-padding, 1rem); }
         @media not all and (min-width: 40rem) {
           [class~="max-sm:pb-6"]:has(form) { padding-bottom: var(--thread-body-inline-padding, 1rem); }
         }
         [class*="ComposerBannerPortal-"]:has(> * > :empty):not(:has(> * > :not(:empty))) { padding-bottom: 0; }
+        header.draggable { background-color: var(--color-surface); }
         """
 
-    /// Adds `composerSpacingCSS` as a constructed style sheet, which survives the page
-    /// re-rendering its own DOM. Its rules aren't in a cascade layer, so they beat chatgpt.com's.
-    private static let composerSpacingScript = """
+    /// Adds `pageLayoutCSS` as a constructed style sheet, which survives the page re-rendering
+    /// its own DOM. Its rules aren't in a cascade layer, so they beat chatgpt.com's.
+    private static let pageLayoutScript = """
         if (location.hostname === "chatgpt.com") {
           const sheet = new CSSStyleSheet();
-          sheet.replaceSync(\(String(decoding: try! JSONEncoder().encode(composerSpacingCSS), as: UTF8.self)));
+          sheet.replaceSync(\(String(decoding: try! JSONEncoder().encode(pageLayoutCSS), as: UTF8.self)));
           document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
         }
         """
