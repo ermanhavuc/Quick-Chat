@@ -63,7 +63,7 @@ final class QuickChatController: NSObject {
     /// chat is always Chat.
     func newChat(temporary: Bool) {
         let path = temporary ? "/?temporary-chat=true" : "/"
-        webView?.callAsyncJavaScript(Self.newChatScript, arguments: ["path": path, "composer": Self.composerSelector],
+        webView?.callAsyncJavaScript(Self.newChatScript, arguments: ["path": path],
                                      in: nil, in: .page) { [weak self] result in
             guard case .failure(let error) = result, let self else { return }
             self.log.error("New chat: \(error.localizedDescription, privacy: .public)")
@@ -80,7 +80,7 @@ final class QuickChatController: NSObject {
         history.pushState(null, "", path);
         dispatchEvent(new PopStateEvent("popstate", {state: null}));
         await new Promise(r => setTimeout(r, 300));
-        document.querySelector(composer)?.focus();
+        \(focusComposerScript)
         """
 
     /// Set while `stepEffort` runs, so a held ⌘] can't open and close the picker over itself.
@@ -91,7 +91,7 @@ final class QuickChatController: NSObject {
     func stepEffort(_ step: Int) {
         guard let webView, !isSteppingEffort else { return }
         isSteppingEffort = true
-        webView.callAsyncJavaScript(Self.stepEffortScript, arguments: ["step": step, "composer": Self.composerSelector],
+        webView.callAsyncJavaScript(Self.stepEffortScript, arguments: ["step": step],
                                     in: nil, in: .page) { [weak self] result in
             guard let self else { return }
             self.isSteppingEffort = false
@@ -139,7 +139,7 @@ final class QuickChatController: NSObject {
         if (opened) {
           press(slider.closest('[role="menu"]'), "Escape");
           await sleep(50);
-          document.querySelector(composer)?.focus();
+          \(focusComposerScript)
         }
         return after !== before ? after : null;
         """
@@ -259,6 +259,8 @@ final class QuickChatController: NSObject {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default()
         config.mediaTypesRequiringUserActionForPlayback = []
+        config.userContentController.addUserScript(WKUserScript(source: Self.composerSpacingScript,
+                                                                injectionTime: .atDocumentStart, forMainFrameOnly: true))
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.customUserAgent = Self.safariUserAgent
         webView.pageZoom = pageZoom
@@ -269,14 +271,39 @@ final class QuickChatController: NSObject {
         return webView
     }
 
-    /// chatgpt.com's composer: once a contenteditable #prompt-textarea, now an unnamed
-    /// contenteditable (ProseMirror) in the composer form.
-    private static let composerSelector = #"#prompt-textarea, form [contenteditable="true"]"#
+    /// Focuses chatgpt.com's message box: once a contenteditable #prompt-textarea, now an unnamed
+    /// contenteditable (ProseMirror) in the composer form. Pages also keep a hidden one (a chat
+    /// has the new-chat page's), so it takes the first that's rendered. Best effort, as it
+    /// depends on chatgpt.com's markup.
+    private static let focusComposerScript =
+        #"[...document.querySelectorAll('#prompt-textarea, form [contenteditable="true"]')].find(e => e.getClientRects().length)?.focus();"#
 
     private func focusComposer() {
-        // Best effort, as the selector depends on chatgpt.com's markup.
-        webView?.evaluateJavaScript("document.querySelector('\(Self.composerSelector)')?.focus()")
+        webView?.evaluateJavaScript(Self.focusComposerScript)
     }
+
+    /// chatgpt.com sizes the gap under its message box for a browser tab: 24px in a chat, and 24px
+    /// plus 16px kept for an (empty) notice on the new-chat page, against 16px at the sides. In
+    /// the panel that shows as a dark strip under the box, so this makes the gap match the sides
+    /// (both follow --thread-body-inline-padding). A notice that has text keeps its space. If
+    /// chatgpt.com renames these hooks, the rules stop matching and the spacing is as before.
+    private static let composerSpacingCSS = """
+        body, body [data-theme] { --thread-composer-bottom-inset: var(--thread-body-inline-padding, 1rem); }
+        @media not all and (min-width: 40rem) {
+          [class~="max-sm:pb-6"]:has(form) { padding-bottom: var(--thread-body-inline-padding, 1rem); }
+        }
+        [class*="ComposerBannerPortal-"]:has(> * > :empty):not(:has(> * > :not(:empty))) { padding-bottom: 0; }
+        """
+
+    /// Adds `composerSpacingCSS` as a constructed style sheet, which survives the page
+    /// re-rendering its own DOM. Its rules aren't in a cascade layer, so they beat chatgpt.com's.
+    private static let composerSpacingScript = """
+        if (location.hostname === "chatgpt.com") {
+          const sheet = new CSSStyleSheet();
+          sheet.replaceSync(\(String(decoding: try! JSONEncoder().encode(composerSpacingCSS), as: UTF8.self)));
+          document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+        }
+        """
 
     /// chatgpt.com or a subdomain of it (not e.g. "notchatgpt.com").
     private static func isChatGPTHost(_ host: String) -> Bool {
