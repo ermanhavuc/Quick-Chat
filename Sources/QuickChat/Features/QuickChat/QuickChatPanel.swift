@@ -301,24 +301,27 @@ final class QuickChatController: NSObject {
         """
 
     /// Layout fixes for chatgpt.com's browser-tab layout, which shows a bit off in the panel:
-    /// - The gap under the message box is 24px in a chat, and 24px plus 16px kept for an (empty)
-    ///   notice on the new-chat page, against 16px at the sides; it showed as a dark strip under
-    ///   the box. The gap now matches the sides (both follow --thread-body-inline-padding); a
-    ///   notice that has text keeps its space.
+    /// - The gap under the message box is 24px in a chat, and on the new-chat page 24px plus a
+    ///   16px-padded notice slot under the box (empty, or "For safety, we may keep a copy of this
+    ///   chat…" in a temporary chat), against 16px at the sides; it showed as a dark strip under
+    ///   the box. The notice is hidden and the gap matches the sides (both follow
+    ///   --thread-body-inline-padding). Other banners in that slot keep their space.
     /// - The top bar is transparent, with only its button groups on pills, so a chat scrolled
     ///   under it showed through between and around the buttons. It now gets the page's surface
     ///   color, as the pills have.
     /// - Under a chat's last message, 82px separated its action icons from the message box: 6px
     ///   of list gap, 20px and 32px of padding, and the 24px "ChatGPT can make mistakes" line.
-    ///   That line is hidden and the padding cut to leave 16px, as at the box's sides. (The
-    ///   temporary chat notice is a different element and stays.)
+    ///   That line is hidden and the padding cut to leave 16px, as at the box's sides.
     /// If chatgpt.com renames these hooks, the rules stop matching and the page looks as before.
     private static let pageLayoutCSS = """
         body, body [data-theme] { --thread-composer-bottom-inset: var(--thread-body-inline-padding, 1rem); }
         @media not all and (min-width: 40rem) {
           [class~="max-sm:pb-6"]:has(form) { padding-bottom: var(--thread-body-inline-padding, 1rem); }
         }
-        [class*="ComposerBannerPortal-"]:has(> * > :empty):not(:has(> * > :not(:empty))) { padding-bottom: 0; }
+        [class*="ComposerBannerPortal-"] [class~="text-codex-description"] { display: none; }
+        [class*="ComposerBannerPortal-"]:has(> * > [class~="text-codex-description"]):not(:has(> * > :not([class~="text-codex-description"]))) {
+          padding-bottom: 0;
+        }
         header.draggable { background-color: var(--color-surface); }
         [class~="text-codex-description"][class~="min-h-6"] { display: none; }
         [class*="transcriptContent-"] { padding-bottom: 0; }
