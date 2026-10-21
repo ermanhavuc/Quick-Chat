@@ -425,11 +425,16 @@ final class QuickChatController: NSObject {
     /// - Under a chat's last message, 82px separated its action icons from the message box: 6px
     ///   of list gap, 20px and 32px of padding, and the 24px "ChatGPT can make mistakes" line.
     ///   That line is hidden and the padding cut to leave 16px, as at the box's sides.
+    /// - In the narrow layout, the temporary chat page's content keeps a scroll bar's width free
+    ///   at its right edge (scrollbar-gutter: stable). With a mouse connected, macOS shows
+    ///   scroll bars that take up room, so the message box sat 15px further from the right edge
+    ///   than the left, though nothing scrolled. The room is now kept only while it scrolls.
     /// If chatgpt.com renames these hooks, the rules stop matching and the page looks as before.
     private static let pageLayoutCSS = """
         body, body [data-theme] { --thread-composer-bottom-inset: var(--thread-body-inline-padding, 1rem); }
         @media not all and (min-width: 40rem) {
           [class~="max-sm:pb-6"]:has(form) { padding-bottom: var(--thread-body-inline-padding, 1rem); }
+          [class~="max-sm:[scrollbar-gutter:stable]"] { scrollbar-gutter: auto; }
         }
         [class*="ComposerBannerPortal-"] [class~="text-codex-description"] { display: none; }
         [class*="ComposerBannerPortal-"]:has(> * > [class~="text-codex-description"]):not(:has(> * > :not([class~="text-codex-description"]))) {
