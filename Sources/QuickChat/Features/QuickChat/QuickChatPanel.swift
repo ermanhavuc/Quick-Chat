@@ -429,6 +429,12 @@ final class QuickChatController: NSObject {
     ///   at its right edge (scrollbar-gutter: stable). With a mouse connected, macOS shows
     ///   scroll bars that take up room, so the message box sat 15px further from the right edge
     ///   than the left, though nothing scrolled. The room is now kept only while it scrolls.
+    /// - In a chat, the messages scroll behind the message box, over a solid strip that starts
+    ///   at the box's top edge and spans the full width. So text ran right up to the box, and
+    ///   the strip covered the scroll bar beside the box: at the end of a chat, where the thumb
+    ///   is, it didn't show. The strip now starts 16px higher (the gap at the box's sides) and
+    ///   paints its color through a ::before inside a scroll bar's width of reserved room
+    ///   (scrollbar-gutter), which matches the real scroll bar at any zoom (none with a trackpad).
     /// If chatgpt.com renames these hooks, the rules stop matching and the page looks as before.
     private static let pageLayoutCSS = """
         body, body [data-theme] { --thread-composer-bottom-inset: var(--thread-body-inline-padding, 1rem); }
@@ -444,6 +450,19 @@ final class QuickChatController: NSObject {
         [class~="text-codex-description"][class~="min-h-6"] { display: none; }
         [class*="transcriptContent-"] { padding-bottom: 0; }
         [class*="transcriptContent-"] > [class~="pb-5"] { padding-bottom: 10px; }
+        .thread-scroll-container [class~="bottom-0"]:has(form) [class*="background-"][class*="surface-"][class~="bg-surface"] {
+          top: calc(-1 * var(--thread-body-inline-padding, 1rem));
+          margin-top: 0;
+          overflow: hidden;
+          scrollbar-gutter: stable;
+          background: none;
+        }
+        .thread-scroll-container [class~="bottom-0"]:has(form) [class*="background-"][class*="surface-"][class~="bg-surface"]::before {
+          content: "";
+          position: absolute;
+          inset: 0;
+          background-color: var(--color-surface);
+        }
         """
 
     /// While `hidesTopBar` is on (the root element has `data-quick-chat-hide-top-bar`), the top
