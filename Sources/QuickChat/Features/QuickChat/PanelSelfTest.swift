@@ -162,6 +162,19 @@ enum PanelSelfTest {
         empty.restore(to: board)
         check(board.pasteboardItems?.isEmpty != false, "an empty clipboard stays empty", "\(board.pasteboardItems?.map(\.types) ?? [])")
 
+        print("10. Liquid Glass behind a see-through page (macOS 26 and later)")
+        let pageStyle = webView.configuration.userContentController.userScripts.first?.source ?? ""
+        if #available(macOS 26, *) {
+            let glass = panel.contentView as? NSGlassEffectView
+            check(glass?.contentView === webView, "the web view sits on a glass view", "\(panel.contentView.map { "\(type(of: $0))" } ?? "nil")")
+            check(!panel.isOpaque && panel.backgroundColor == .clear, "the panel is see-through")
+            check(webView.value(forKey: "drawsBackground") as? Bool == false, "the web view draws no background")
+            check(pageStyle.contains("--quick-chat-glass-fill"), "the page style has the glass rules")
+        } else {
+            check(panel.contentView === webView && panel.isOpaque, "a solid panel")
+            check(!pageStyle.contains("--quick-chat-glass-fill"), "no glass rules in the page style")
+        }
+
         print(failures == 0 ? "panel self-test: ALL PASSED" : "panel self-test: \(failures) FAILED")
         return failures == 0
     }

@@ -314,7 +314,7 @@ final class QuickChatController: NSObject {
         panel.maximizeShortcut = maximizeShortcut
 
         let webView = makeWebView()
-        panel.contentView = webView
+        panel.setContent(webView)
 
         if !panel.setFrameUsingName(QuickChatPanel.autosaveName) {
             // First open: the bottom center of the screen with the mouse.
@@ -462,6 +462,42 @@ final class QuickChatController: NSObject {
         .thread-scroll-container [class*="h-[calc(var(--thread-scroll-padding-bottom)"] { height: 0; }
         """
 
+    /// Liquid Glass (macOS 26 and later; see `QuickChatPanel.setContent`): the page lets the
+    /// panel's glass show through instead of painting chatgpt.com's surfaces.
+    /// - The page is a 45% tint of the Mac background color over the glass, following the page's
+    ///   Light/Dark theme, so text stays readable over a bright window behind the panel. Its body,
+    ///   main area and the strip behind the message box (in a chat and on the new-chat page) are
+    ///   see-through, and so are the wide layout's (⌘F) page layers and docked sidebar, which
+    ///   keeps its own light tint.
+    /// - The message box and the top bar's buttons get a see-through white fill: 7% in Dark mode,
+    ///   70% in Light mode (chatgpt.com's solid white box looked pasted on). Menus, dialogs and
+    ///   the narrow layout's sliding sidebar keep their solid Mac colors.
+    /// - With the top bar shown (⌘\), a chat's scroll area starts 16px below its buttons, as it
+    ///   ends 16px above the message box, so text doesn't run behind the see-through bar.
+    /// chatgpt.com paints the root and body through an attribute selector; `:root` ties with it
+    /// and wins as the later sheet.
+    private static let glassCSS = """
+        :root { background-color: color-mix(in srgb, var(--quick-chat-surface) 45%, transparent); }
+        :root body, main[class*="MainContentSurface-"], header.draggable, [class~="max-sm:bg-surface"]:has(form),
+        [class~="bottom-0"]:has(form) [class*="background-"][class*="surface-"][class~="bg-surface"],
+        [class*="FullHeightPageSurfaceLayout-"], [class*="FullHeightPageSurfaceLayout-"] > ::before,
+        .sidebar-navigation:not([class*="ConversationSidebar-"]) {
+          background-color: transparent;
+        }
+        :root, [data-theme] { --quick-chat-glass-fill: light-dark(rgb(255 255 255 / 0.7), rgb(255 255 255 / 0.07)); }
+        [class*="ComposerLayoutRoot-"]:is([data-composer-surface-variant="default"], [data-composer-surface-variant="opaque"]) {
+          --composer-layout-surface-background: var(--quick-chat-glass-fill);
+        }
+        header.draggable [class~="bg-surface"], header.draggable [class~="browser:bg-surface"] {
+          background-color: var(--quick-chat-glass-fill);
+        }
+        :root:not([data-quick-chat-hide-top-bar]) main:has(> header.draggable) .thread-scroll-container {
+          margin-top: var(--thread-floating-content-top-inset, 60px);
+          padding-top: calc(var(--thread-content-top-inset, 84px) - var(--thread-floating-content-top-inset, 60px));
+          max-height: calc(100% - var(--thread-scroll-padding-bottom, 0px) - var(--thread-floating-content-top-inset, 60px));
+        }
+        """
+
     /// While `hidesTopBar` is on (the root element has `data-quick-chat-hide-top-bar`), the top
     /// bar is gone: its sidebar button (⇧⌘S does the same), Chat/Work switch, temporary chat
     /// button (⇧⌘N), and in a chat its New chat, Share and More buttons. The content frame's
@@ -474,13 +510,19 @@ final class QuickChatController: NSObject {
         }
         """
 
-    /// Adds `macColorsCSS`, `pageLayoutCSS` and `hideTopBarCSS` as a constructed style sheet,
-    /// which survives the page re-rendering its own DOM. Its rules aren't in a cascade layer, so
-    /// they beat chatgpt.com's.
+    /// The page's touch-ups, with `glassCSS` where the panel is Liquid Glass.
+    private static var pageCSS: String {
+        let css = macColorsCSS + pageLayoutCSS + hideTopBarCSS
+        if #available(macOS 26, *) { return css + glassCSS }
+        return css
+    }
+
+    /// Adds `pageCSS` as a constructed style sheet, which survives the page re-rendering its own
+    /// DOM. Its rules aren't in a cascade layer, so they beat chatgpt.com's.
     private static let pageStyleScript = """
         if (location.hostname === "chatgpt.com") {
           const sheet = new CSSStyleSheet();
-          sheet.replaceSync(\(String(decoding: try! JSONEncoder().encode(macColorsCSS + pageLayoutCSS + hideTopBarCSS), as: UTF8.self)));
+          sheet.replaceSync(\(String(decoding: try! JSONEncoder().encode(pageCSS), as: UTF8.self)));
           document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
         }
         """
@@ -727,6 +769,19 @@ final class QuickChatPanel: NSPanel {
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
+
+    /// Puts the web view in the panel. On macOS 26 and later, it sits on a Liquid Glass sheet and
+    /// draws no background of its own, so the page's see-through parts (`glassCSS`) show the glass.
+    func setContent(_ webView: WKWebView) {
+        guard #available(macOS 26, *) else { contentView = webView; return }
+        backgroundColor = .clear
+        isOpaque = false
+        webView.setValue(false, forKey: "drawsBackground") // no public API for a see-through web view
+        webView.underPageBackgroundColor = .clear
+        let glass = NSGlassEffectView()
+        glass.contentView = webView
+        contentView = glass
+    }
 
     /// AppKit's own zoom, if anything still triggers it, toggles maximize instead.
     override func zoom(_ sender: Any?) { toggleMaximize() }
