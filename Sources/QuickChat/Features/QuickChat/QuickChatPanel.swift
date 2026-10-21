@@ -423,18 +423,22 @@ final class QuickChatController: NSObject {
     ///   under it showed through between and around the buttons. It now gets the page's surface
     ///   color, as the pills have.
     /// - Under a chat's last message, 82px separated its action icons from the message box: 6px
-    ///   of list gap, 20px and 32px of padding, and the 24px "ChatGPT can make mistakes" line.
-    ///   That line is hidden and the padding cut to leave 16px, as at the box's sides.
+    ///   of list gap (before an empty placeholder chatgpt.com sizes while answering), 20px and
+    ///   32px of padding, and the 24px "ChatGPT can make mistakes" line. That line is hidden and
+    ///   the rest cut to nothing, so the icons end at the scroll area's edge, 16px above the box
+    ///   (see the last point).
     /// - In the narrow layout, the temporary chat page's content keeps a scroll bar's width free
     ///   at its right edge (scrollbar-gutter: stable). With a mouse connected, macOS shows
     ///   scroll bars that take up room, so the message box sat 15px further from the right edge
     ///   than the left, though nothing scrolled. The room is now kept only while it scrolls.
-    /// - In a chat, the messages scroll behind the message box, over a solid strip that starts
-    ///   at the box's top edge and spans the full width. So text ran right up to the box, and
-    ///   the strip covered the scroll bar beside the box: at the end of a chat, where the thumb
-    ///   is, it didn't show. The strip now starts 16px higher (the gap at the box's sides) and
-    ///   paints its color through a ::before inside a scroll bar's width of reserved room
-    ///   (scrollbar-gutter), which matches the real scroll bar at any zoom (none with a trackpad).
+    /// - In a chat, the scroll area filled the panel and the messages scrolled behind the
+    ///   message box, over a solid strip from the box's top edge down; a spacer as tall as that
+    ///   strip (chatgpt.com measures it into --thread-scroll-padding-bottom) let the last message
+    ///   scroll above it. So text ran right up to the box, and with a mouse connected the scroll
+    ///   bar ran down beside the box, its thumb hidden behind the strip at the end of a chat.
+    ///   The scroll area now ends 16px above the box (the gap at its sides), so its scroll bar
+    ///   and text end there too, and the spacer is gone. The variable is the strip's height plus
+    ///   that 16px (the spacer subtracts it), so the scroll area is the panel minus the variable.
     /// If chatgpt.com renames these hooks, the rules stop matching and the page looks as before.
     private static let pageLayoutCSS = """
         body, body [data-theme] { --thread-composer-bottom-inset: var(--thread-body-inline-padding, 1rem); }
@@ -449,20 +453,13 @@ final class QuickChatController: NSObject {
         header.draggable { background-color: var(--color-surface); }
         [class~="text-codex-description"][class~="min-h-6"] { display: none; }
         [class*="transcriptContent-"] { padding-bottom: 0; }
-        [class*="transcriptContent-"] > [class~="pb-5"] { padding-bottom: 10px; }
-        .thread-scroll-container [class~="bottom-0"]:has(form) [class*="background-"][class*="surface-"][class~="bg-surface"] {
-          top: calc(-1 * var(--thread-body-inline-padding, 1rem));
-          margin-top: 0;
-          overflow: hidden;
-          scrollbar-gutter: stable;
-          background: none;
+        [class*="transcriptContent-"] > [class~="pb-5"] { padding-bottom: 0; }
+        [class*="transcriptContent-"] > [class~="pb-5"] > :last-child:empty { margin-top: -0.375rem; }
+        .thread-scroll-container {
+          max-height: calc(100% - var(--thread-scroll-padding-bottom, 0px));
+          scroll-padding-bottom: 0;
         }
-        .thread-scroll-container [class~="bottom-0"]:has(form) [class*="background-"][class*="surface-"][class~="bg-surface"]::before {
-          content: "";
-          position: absolute;
-          inset: 0;
-          background-color: var(--color-surface);
-        }
+        .thread-scroll-container [class*="h-[calc(var(--thread-scroll-padding-bottom)"] { height: 0; }
         """
 
     /// While `hidesTopBar` is on (the root element has `data-quick-chat-hide-top-bar`), the top
