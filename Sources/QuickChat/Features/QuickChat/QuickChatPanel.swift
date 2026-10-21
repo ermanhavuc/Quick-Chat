@@ -6,6 +6,10 @@ import WebKit
 @MainActor
 final class QuickChatController: NSObject {
     private static let chatURL = URL(string: "https://chatgpt.com/")!
+    /// A new temporary chat (not saved in your chat history): what the panel starts on, and what
+    /// ⌘N and Ask About Selection open.
+    static let temporaryChatPath = "/?temporary-chat=true"
+    private static let temporaryChatURL = URL(string: temporaryChatPath, relativeTo: chatURL)!
     /// Sign-in pages (OpenAI, Google, Apple, Microsoft), which with chatgpt.com are the only pages
     /// links open inside Quick Chat. Just these hosts, not their whole sites: a link to e.g.
     /// openai.com/terms or support.apple.com belongs in the browser.
@@ -78,11 +82,11 @@ final class QuickChatController: NSObject {
     /// ⌘\: shows or hides chatgpt.com's top bar.
     func toggleTopBar() { hidesTopBar.toggle() }
 
-    /// ⌘N / ⇧⌘N: a new chat, or a new temporary chat (chatgpt.com's `?temporary-chat=true`).
-    /// Like chatgpt.com's own New chat, it stays in the current Chat or Work mode; a temporary
-    /// chat is always Chat.
+    /// ⌘N / ⇧⌘N: a new temporary chat (chatgpt.com's `?temporary-chat=true`), or a new saved one.
+    /// Like chatgpt.com's own New chat, a saved one stays in the current Chat or Work mode; a
+    /// temporary chat is always Chat.
     func newChat(temporary: Bool) {
-        let path = temporary ? "/?temporary-chat=true" : "/"
+        let path = temporary ? Self.temporaryChatPath : "/"
         webView?.callAsyncJavaScript(Self.newChatScript, arguments: ["path": path],
                                      in: nil, in: .page) { [weak self] result in
             guard case .failure(let error) = result, let self else { return }
@@ -92,50 +96,76 @@ final class QuickChatController: NSObject {
     }
 
     /// Goes to `path` through chatgpt.com's own router (pushState plus the popstate event that
-    /// Back/Forward fire), which is quicker than reloading the app. Reloads when already there,
-    /// so the chat still starts fresh, and loads chatgpt.com when on another site (sign-in).
+    /// Back/Forward fire), which is quicker than reloading the app. Already there: does nothing
+    /// if that chat has no messages yet, else reloads so the chat starts fresh. Loads
+    /// chatgpt.com when on another site (sign-in).
     private static let newChatScript = """
         if (location.host !== "chatgpt.com") { location.href = "https://chatgpt.com" + path; return; }
-        if (location.pathname + location.search === path) { location.reload(); return; }
+        if (location.pathname + location.search === path) {
+          if (\(hasMessagesScript)) location.reload(); else \(focusComposerScript)
+          return;
+        }
         history.pushState(null, "", path);
         dispatchEvent(new PopStateEvent("popstate", {state: null}));
         await new Promise(r => setTimeout(r, 300));
         \(focusComposerScript)
         """
 
-    /// Text for `ask(about:)` that waits for the page to finish loading.
-    private var pendingQuestion: String?
+    /// Whether the visible chat has messages (each turn has a data-turn-key); the previous
+    /// chat's stay in the page, hidden, after a new chat.
+    private static let hasMessagesScript =
+        #"[...document.querySelectorAll("[data-turn-key]")].some(e => e.getClientRects().length)"#
 
-    /// Shows the panel with a new chat that has `text` in its message box (after anything
-    /// already typed there), ready for a question about it.
+    /// Text for `ask(about:)` that waits for the page to finish loading; `afterReload` once the
+    /// page was reloaded for it.
+    private var pendingQuestion: (text: String, afterReload: Bool)?
+
+    /// Shows the panel with a new temporary chat that has `text` in its message box (after
+    /// anything already typed there), ready for a question about it.
     func ask(about text: String) {
         show()
         guard let webView else { return }
-        if webView.isLoading { pendingQuestion = text } else { insertQuestion(text) }
+        if webView.isLoading { pendingQuestion = (text, false) } else { insertQuestion(text, afterReload: false) }
     }
 
-    private func insertQuestion(_ text: String) {
-        webView?.callAsyncJavaScript(Self.askScript, arguments: ["text": text], in: nil, in: .page) { [weak self] result in
-            guard case .failure(let error) = result, let self else { return }
-            let message = (error as NSError).userInfo["WKJavaScriptExceptionMessage"] as? String
-            self.log.error("Ask about selection: \(message ?? error.localizedDescription, privacy: .public)")
-            NSSound.beep()
+    private func insertQuestion(_ text: String, afterReload: Bool) {
+        webView?.callAsyncJavaScript(Self.askScript, arguments: ["text": text, "path": Self.temporaryChatPath],
+                                     in: nil, in: .page) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let value as String) where value == "reload" && !afterReload:
+                // A chat with messages at the new chat's own address: only a reload leaves it.
+                self.pendingQuestion = (text, true)
+                self.webView?.load(URLRequest(url: Self.temporaryChatURL))
+            case .success(let value as String) where value == "reload":
+                self.log.error("Ask about selection: still in a chat after reloading")
+                NSSound.beep()
+            case .success:
+                break
+            case .failure(let error):
+                let message = (error as NSError).userInfo["WKJavaScriptExceptionMessage"] as? String
+                self.log.error("Ask about selection: \(message ?? error.localizedDescription, privacy: .public)")
+                NSSound.beep()
+            }
         }
     }
 
-    /// Opens a new chat like `newChatScript`, but never reloads, which would drop the text. Then
-    /// pastes `text` into the message box as if with ⌘V (so a long text becomes an attachment, as
-    /// chatgpt.com does with pastes), followed by an empty line for the question. Waits (up to
-    /// 5 s) for the new chat's message box: the previous one stays in the page, hidden, and may
-    /// still show for a moment; it's never written to.
+    /// Opens a new chat at `path` like `newChatScript`, but never reloads itself, which would
+    /// drop the text: it returns "reload" if that's needed, and `insertQuestion` reloads and
+    /// runs it again. Then pastes `text` into the message box as if with ⌘V (so a long text
+    /// becomes an attachment, as chatgpt.com does with pastes), followed by an empty line for
+    /// the question. Waits (up to 5 s) for the new chat's message box: the previous one stays in
+    /// the page, hidden, and may still show for a moment; it's never written to.
     private static let askScript = """
         const sleep = ms => new Promise(r => setTimeout(r, ms));
         const messageBox = () => [...document.querySelectorAll('#prompt-textarea, form [contenteditable="true"]')]
           .find(e => e.getClientRects().length);
         if (location.hostname !== "chatgpt.com") throw new Error("not on chatgpt.com");
-        const previous = location.pathname + location.search === "/" ? null : messageBox();
+        const here = location.pathname + location.search === path;
+        if (here && \(hasMessagesScript)) return "reload";
+        const previous = here ? null : messageBox();
         if (previous !== null) {
-          history.pushState(null, "", "/");
+          history.pushState(null, "", path);
           dispatchEvent(new PopStateEvent("popstate", {state: null}));
         }
         let box;
@@ -297,7 +327,7 @@ final class QuickChatController: NSObject {
 
         self.panel = panel
         self.webView = webView
-        webView.load(URLRequest(url: Self.chatURL))
+        webView.load(URLRequest(url: Self.temporaryChatURL))
         return panel
     }
 
@@ -560,9 +590,9 @@ extension QuickChatController: WKUIDelegate, WKNavigationDelegate, WKDownloadDel
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         focusComposer()
-        if webView === self.webView, let text = pendingQuestion {
+        if webView === self.webView, let pending = pendingQuestion {
             pendingQuestion = nil
-            insertQuestion(text)
+            insertQuestion(pending.text, afterReload: pending.afterReload)
         }
     }
 
@@ -570,7 +600,7 @@ extension QuickChatController: WKUIDelegate, WKNavigationDelegate, WKDownloadDel
     /// leaves the view blank; reload right away so it's ready before the panel is shown again.
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         log.info("Web content process terminated; reloading")
-        if webView.url != nil { webView.reload() } else { webView.load(URLRequest(url: Self.chatURL)) }
+        if webView.url != nil { webView.reload() } else { webView.load(URLRequest(url: Self.temporaryChatURL)) }
     }
 
     func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters,
@@ -631,7 +661,7 @@ final class QuickChatPanel: NSPanel {
     var onZoom: ((Int) -> Void)?
     /// ⌘[ / ⌘]: thinking effort one level down (-1) or up (+1).
     var onEffort: ((Int) -> Void)?
-    /// ⌘N / ⇧⌘N: new chat; `true` for a temporary one.
+    /// ⌘N / ⇧⌘N: new chat; `true` for a temporary one (⌘N).
     var onNewChat: ((Bool) -> Void)?
     /// ⌘\: show or hide chatgpt.com's top bar.
     var onToggleTopBar: (() -> Void)?
@@ -767,7 +797,7 @@ final class QuickChatPanel: NSPanel {
 
     override func close() { onCancel?() }
 
-    /// ⌘W hides, ⌘N / ⇧⌘N start a (temporary) chat, ⌘− / ⌘= / ⌘0 zoom, ⌘[ / ⌘] change the
+    /// ⌘W hides, ⌘N / ⇧⌘N start a temporary / saved chat, ⌘− / ⌘= / ⌘0 zoom, ⌘[ / ⌘] change the
     /// thinking effort and ⌘\ shows or hides the top bar; the local shortcuts are caught here
     /// too, ahead of the web view (which otherwise claims ⌘ combos).
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
@@ -779,7 +809,7 @@ final class QuickChatPanel: NSPanel {
         }
         let flags = event.modifierFlags.intersection([.shift, .control, .option, .command])
         if event.charactersIgnoringModifiers?.lowercased() == "n", flags == .command || flags == [.command, .shift] {
-            onNewChat?(flags.contains(.shift))
+            onNewChat?(!flags.contains(.shift))
             return true
         }
         if flags == .command, event.charactersIgnoringModifiers == "\\" {

@@ -84,13 +84,15 @@ enum PanelSelfTest {
         _ = press("]", [.command, .control])
         check(steps == [-1, 1], "⌘[ → down, ⌘] → up; plain [ and ⌃⌘] ignored", "\(steps)")
 
-        print("5. ⌘N / ⇧⌘N start a new (temporary) chat")
+        print("5. starts on a temporary chat; ⌘N / ⇧⌘N start a new temporary / saved chat")
+        let start = webView.url?.absoluteString ?? "none"
+        check(start == "https://chatgpt.com/?temporary-chat=true", "first page: a new temporary chat", start)
         var newChats: [Bool] = []
         panel.onNewChat = { newChats.append($0) }
         check(press("n") && press("N", [.command, .shift]), "⌘N and ⇧⌘N handled")
         _ = press("n", [])
         _ = press("n", [.command, .option])
-        check(newChats == [false, true], "⌘N → new chat, ⇧⌘N → temporary; plain n and ⌥⌘N ignored", "\(newChats)")
+        check(newChats == [true, false], "⌘N → temporary, ⇧⌘N → saved; plain n and ⌥⌘N ignored", "\(newChats)")
 
         print("6. opens at the bottom center of the screen; ⌘O goes back there")
         func atBottomCenter(_ name: String) {
