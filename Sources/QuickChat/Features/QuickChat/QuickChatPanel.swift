@@ -344,6 +344,8 @@ final class QuickChatController: NSObject {
         panel = nil
         webView = nil
         content = nil
+        revealTimer?.invalidate()
+        revealTimer = nil
         pendingQuestion = nil
         stopWatchingAnswer()
         hasUnseenAnswer = false
@@ -470,6 +472,7 @@ final class QuickChatController: NSObject {
         let content = QuickChatContentView(webView: webView)
         panel.setContent(content)
         self.content = content
+        coverUntilReady()
 
         if !panel.setFrameUsingName(QuickChatPanel.autosaveName) {
             // First open: the bottom center of the screen with the mouse.
@@ -522,6 +525,7 @@ final class QuickChatController: NSObject {
         addUserScripts(to: config.userContentController)
         config.userContentController.add(self, name: Self.dragMessage)
         config.userContentController.add(self, name: Self.openInBrowserMessage)
+        config.userContentController.add(self, name: Self.readyMessage)
         let webView = QuickChatWebView(frame: .zero, configuration: config)
         webView.customUserAgent = Self.safariUserAgent
         webView.pageZoom = pageZoom
@@ -538,7 +542,7 @@ final class QuickChatController: NSObject {
     private func addUserScripts(to controller: WKUserContentController) {
         controller.removeAllUserScripts()
         for source in [Self.pageStyleScript, Self.topBarScript(hidden: hidesTopBar), Self.dragScript, Self.chatOnlyScript,
-                       Self.shareInMenuScript] {
+                       Self.shareInMenuScript, Self.readyScript] {
             controller.addUserScript(WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         }
     }
@@ -552,6 +556,26 @@ final class QuickChatController: NSObject {
 
     private func focusComposer() {
         webView?.evaluateJavaScript(Self.focusComposerScript)
+    }
+
+    // MARK: Loading
+
+    private var revealTimer: Timer?
+
+    /// Shows the spinner instead of a page that's loading (chatgpt.com builds its page in steps
+    /// that move things around) until it's ready (`reveal`), and at most 10 s.
+    private func coverUntilReady() {
+        content?.setLoading(true)
+        revealTimer?.invalidate()
+        revealTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.reveal() }
+        }
+    }
+
+    private func reveal() {
+        revealTimer?.invalidate()
+        revealTimer = nil
+        content?.setLoading(false)
     }
 
     /// Mac colors for chatgpt.com's surfaces: the page and its top bar, sidebar and side rail take
@@ -740,6 +764,32 @@ final class QuickChatController: NSObject {
 
     private static let dragMessage = "quickChatDragPanel"
     private static let openInBrowserMessage = "quickChatOpenInBrowser"
+    private static let readyMessage = "quickChatPageReady"
+
+    /// Tells the app when chatgpt.com has built its page (`coverUntilReady`): loaded, its message
+    /// box shown and still for 250 ms (before that, the server's first version of the page and
+    /// the app taking it over move things around), with the box's model picker, which arrives
+    /// last (up to seconds later); without one (signed out), 4 s after the box. Checks every
+    /// 50 ms until then (also while the page doesn't draw: hidden or covered), and only on a
+    /// page load. Depends on chatgpt.com's markup.
+    private static let readyScript = """
+        if (location.hostname === "chatgpt.com") {
+          let last = "", still = 0, firstBox = 0;
+          const check = () => {
+            const now = performance.now();
+            const box = document.readyState === "complete"
+              && [...document.querySelectorAll('form [contenteditable="true"]')].find(e => e.getClientRects().length);
+            if (box && !firstBox) firstBox = now;
+            const r = box ? box.getBoundingClientRect() : null;
+            const place = r ? [r.x, r.y, r.width, r.height].join() : "";
+            if (place !== last) { last = place; still = now; }
+            const built = box && (box.closest("form").querySelector('button[aria-label="Select ChatGPT model"]') || now - firstBox > 4000);
+            if (built && now - still >= 250) webkit.messageHandlers.\(readyMessage).postMessage(null);
+            else setTimeout(check, 50);
+          };
+          check();
+        }
+        """
 
     /// Keeps the panel to chats (`isChatPath`): a link to another chatgpt.com page, or the page
     /// moving there itself (it routes in place with pushState or replaceState, without a page
@@ -970,13 +1020,16 @@ extension QuickChatController: NSWindowDelegate {
 extension QuickChatController: WKScriptMessageHandler {
     /// `dragScript`: a press on the panel's top bar, away from its buttons. `chatOnlyScript`: a
     /// chatgpt.com page that isn't a chat, for the default browser (nothing else is opened),
-    /// from the panel or a popup, which share these scripts.
+    /// from the panel or a popup, which share these scripts. `readyScript`: the panel's page is
+    /// built.
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         let fromPanel = message.webView === webView
         guard fromPanel || popups.contains(where: { $0.contentView === message.webView }) else { return }
         switch message.name {
         case Self.dragMessage:
             if fromPanel { panel?.dragFromPage() }
+        case Self.readyMessage:
+            if fromPanel { reveal() }
         case Self.openInBrowserMessage:
             guard let href = message.body as? String, let url = URL(string: href), url.scheme == "https",
                   url.host?.lowercased() == "chatgpt.com", !Self.isChatPath(url.path) else { return }
@@ -1046,17 +1099,29 @@ extension QuickChatController: WKUIDelegate, WKNavigationDelegate, WKDownloadDel
         download.delegate = self
     }
 
-    /// Popups share the panel's page scripts but not its ⌘\, so they keep chatgpt.com's top bar.
+    /// A new page in the panel: hidden until it's built (`coverUntilReady`). Popups share the
+    /// panel's page scripts but not its ⌘\, so they keep chatgpt.com's top bar.
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
-        if webView !== self.webView { webView.evaluateJavaScript(Self.topBarScript(hidden: false)) }
+        if webView === self.webView { coverUntilReady() } else { webView.evaluateJavaScript(Self.topBarScript(hidden: false)) }
     }
 
+    /// The panel's page is loaded: one that isn't chatgpt.com (signing in) shows now;
+    /// chatgpt.com's when its page is built (`readyScript`).
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        if webView === self.webView, webView.url?.host?.lowercased() != "chatgpt.com" { reveal() }
         focusComposer()
         if webView === self.webView, let pending = pendingQuestion {
             pendingQuestion = nil
             insertQuestion(pending.text, afterReload: pending.afterReload)
         }
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        if webView === self.webView { reveal() }
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        if webView === self.webView { reveal() }
     }
 
     /// macOS may kill the web content process (often while hidden, under memory pressure), which
@@ -1151,6 +1216,7 @@ final class QuickChatContentView: NSView, @preconcurrency NSTextFinderBarContain
     let finder = NSTextFinder()
     private var toast: ToastView?
     private var toastTimer: Timer?
+    private var loadingView: LoadingView?
 
     init(webView: QuickChatWebView) {
         self.webView = webView
@@ -1192,6 +1258,26 @@ final class QuickChatContentView: NSView, @preconcurrency NSTextFinderBarContain
 
     func findBarViewDidChangeHeight() { layoutContent() }
 
+    /// While the page loads, it's invisible (it still loads and lays out as usual) and a spinner
+    /// sits in its place; then the spinner goes and the page fades in.
+    var isLoading: Bool { loadingView != nil }
+
+    func setLoading(_ loading: Bool) {
+        guard loading != isLoading else { return }
+        if loading {
+            let view = LoadingView()
+            addSubview(view, positioned: .above, relativeTo: webView)
+            loadingView = view
+            webView.alphaValue = 0
+            layoutContent()
+        } else {
+            loadingView?.removeFromSuperview()
+            loadingView = nil
+            if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { return webView.alphaValue = 1 }
+            NSAnimationContext.runAnimationGroup { $0.duration = 0.25; webView.animator().alphaValue = 1 }
+        }
+    }
+
     func find(_ action: NSTextFinder.Action) {
         finder.performAction(action)
         if action == .showFindInterface { isFindBarVisible = true }
@@ -1216,6 +1302,7 @@ final class QuickChatContentView: NSView, @preconcurrency NSTextFinderBarContain
                                        width: bounds.width, height: findBarView.frame.height)
         }
         webView.frame = NSRect(x: 0, y: 0, width: bounds.width, height: bounds.height - barHeight)
+        loadingView?.frame = webView.frame
         if let toast {
             var size = toast.preferredSize
             size.width = min(size.width, bounds.width - 32)
@@ -1253,6 +1340,32 @@ final class QuickChatContentView: NSView, @preconcurrency NSTextFinderBarContain
     }
 
     var toastText: String? { toast?.text } // for the self-test
+}
+
+/// The spinner `QuickChatContentView.setLoading` shows in place of a loading page. A press on
+/// it moves the panel, rather than reaching buttons on the hidden page.
+private final class LoadingView: NSView {
+    private let spinner = NSProgressIndicator()
+
+    init() {
+        super.init(frame: .zero)
+        spinner.style = .spinning
+        spinner.isIndeterminate = true
+        spinner.setAccessibilityLabel("Loading ChatGPT")
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(spinner)
+        NSLayoutConstraint.activate([
+            spinner.centerXAnchor.constraint(equalTo: centerXAnchor), spinner.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+        spinner.startAnimation(nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { frame.contains(point) ? self : nil }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func mouseDown(with event: NSEvent) { window?.performDrag(with: event) }
 }
 
 /// What a click on a toast does, and the words for it at the toast's end ("Show in Finder").

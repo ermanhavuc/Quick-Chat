@@ -51,6 +51,8 @@ enum PanelSelfTest {
         check(webFrame == frameView.bounds, "web view fills the panel", "\(webFrame) vs \(frameView.bounds)")
 
         print("2. clicks at the top of the panel reach the page")
+        // Once it's shown: while it loads, a spinner takes the clicks (section 18).
+        spin(until: { (webView.superview as? QuickChatContentView)?.isLoading == false }, seconds: 15)
         for y in [4.0, 14, 24, 40] {
             let point = NSPoint(x: 40, y: frameView.bounds.maxY - y)
             let hit = frameView.hitTest(point)
@@ -141,7 +143,7 @@ enum PanelSelfTest {
             let scripts = webView.configuration.userContentController.userScripts.map(\.source)
             let flag = scripts.first { $0.contains("toggleAttribute(\"data-quick-chat-hide-top-bar\"") }
             let saved = defaults.object(forKey: topBarKey) as? Bool ?? true // nothing saved yet: the default
-            check(chat.hidesTopBar == hidden && saved == hidden && scripts.count == 5
+            check(chat.hidesTopBar == hidden && saved == hidden && scripts.count == 6
                   && flag?.hasSuffix(", \(hidden));") == true, name, "\(scripts.count) scripts, flag: \(flag ?? "none")")
         }
         topBar(hidden: true, "hidden by default")
@@ -380,6 +382,21 @@ enum PanelSelfTest {
             document.getElementById("quick-chat-self-test-menu").remove();
             true
             """#)
+
+        print("18. a loading page hides behind a spinner until chatgpt.com has built it")
+        chat.show() // section 16 left it hidden, where the page doesn't draw
+        let reloadStart = Date()
+        webView.reload()
+        spin(until: { content.isLoading }, seconds: 5)
+        let middle = content.convert(NSPoint(x: content.bounds.midX, y: content.bounds.midY), to: content.superview)
+        let hit = content.hitTest(middle).map { "\(type(of: $0))" } ?? "nothing"
+        check(content.isLoading && webView.alphaValue == 0 && hit == "LoadingView",
+              "while it loads: the page hidden, a spinner in its place that takes the clicks", "\(content.isLoading), \(webView.alphaValue), \(hit)")
+        spin(until: { !content.isLoading }, seconds: 12)
+        let took = Date().timeIntervalSince(reloadStart)
+        check(!content.isLoading && took < 9, "shown once built, well before the 10 s fallback", String(format: "%.1f s", took))
+        spin(until: { webView.alphaValue == 1 }, seconds: 1)
+        check(webView.alphaValue == 1, "… and the page is fully there")
 
         print(failures == 0 ? "panel self-test: ALL PASSED" : "panel self-test: \(failures) FAILED")
         return failures == 0
