@@ -39,12 +39,7 @@ final class QuickChatController: NSObject {
         didSet { panel?.resetSizeShortcut = resetSizeShortcut }
     }
 
-    /// Local shortcut (only while the panel is key) that toggles maximize.
-    var maximizeShortcut = Shortcut.loadMaximize() {
-        didSet { panel?.maximizeShortcut = maximizeShortcut }
-    }
-
-    /// Puts the panel back to its default size at the bottom center of its screen (no-op if it
+    /// Moves the panel back to the bottom center of its screen, keeping its size (no-op if it
     /// was never built).
     func resetPosition() { panel?.resetPosition() }
 
@@ -470,7 +465,6 @@ final class QuickChatController: NSObject {
         panel.onFind = { [weak self] in self?.find($0) }
         panel.onOpenInBrowser = { [weak self] in self?.openChatInBrowser() }
         panel.resetSizeShortcut = resetSizeShortcut
-        panel.maximizeShortcut = maximizeShortcut
 
         let webView = makeWebView()
         let content = QuickChatContentView(webView: webView)
@@ -636,7 +630,7 @@ final class QuickChatController: NSObject {
     /// - The page is a 45% tint of the Mac background color over the glass, following the page's
     ///   Light/Dark theme, so text stays readable over a bright window behind the panel. Its body,
     ///   main area and the strip behind the message box (in a chat and on the new-chat page) are
-    ///   see-through, and so are the wide layout's (⌘F) page layers and docked sidebar, which
+    ///   see-through, and so are the wide layout's page layers and docked sidebar, which
     ///   keeps its own light tint.
     /// - The message box and the top bar's buttons get a see-through white fill: 7% in Dark mode,
     ///   70% in Light mode (chatgpt.com's solid white box looked pasted on). Menus, dialogs and
@@ -669,7 +663,7 @@ final class QuickChatController: NSObject {
 
     /// Quick Chat is just chats (see `chatOnlyScript`), so chatgpt.com's sidebar is gone: its
     /// button in the top bar, the sidebar that slides in over the chat (with its dimmed
-    /// backdrop), and in the wide layout (⌘F) the side panel with its icon rail. The Chat/Work
+    /// backdrop), and in the wide layout the side panel with its icon rail. The Chat/Work
     /// switch on the new-chat page goes too. A group of top bar buttons is hidden only if the
     /// sidebar button is all it holds (in a chat, New chat sits beside it).
     private static let chatOnlyCSS = """
@@ -1367,15 +1361,6 @@ final class QuickChatPanel: NSPanel {
     var onOpenInBrowser: (() -> Void)?
     /// Local key combo that calls `resetPosition()` while the panel is key (default ⌘O).
     var resetSizeShortcut: Shortcut? = .commandO
-    /// Local key combo that calls `toggleMaximize()` while the panel is key (default ⌘F).
-    var maximizeShortcut: Shortcut? = .commandF
-
-    /// The user's frame from before maximizing; non-nil while maximized. Hiding and showing
-    /// keep the panel maximized; a relaunch doesn't, as the maximized frame is never autosaved.
-    private var restoreFrame: NSRect?
-    var isMaximized: Bool { restoreFrame != nil }
-    /// Set while the panel changes its own frame, so only user moves/resizes end the maximize.
-    private var isSettingFrame = false
     /// The last left mouse-down in the panel, for `dragFromPage()`.
     private var lastMouseDown: NSEvent?
 
@@ -1386,7 +1371,7 @@ final class QuickChatPanel: NSPanel {
         title = "ChatGPT"
         titleVisibility = .hidden
         titlebarAppearsTransparent = true
-        // No full screen or tiling: ⌘F's maximize is the panel's only zoom.
+        // No full screen or tiling.
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .fullScreenNone, .fullScreenDisallowsTiling]
         // No traffic lights either, so the title bar is invisible and chatgpt.com fills the
         // panel to its top edge (clicks there reach the page).
@@ -1400,10 +1385,6 @@ final class QuickChatPanel: NSPanel {
         isMovableByWindowBackground = false
         minSize = NSSize(width: 400, height: 400)
         backgroundColor = .windowBackgroundColor
-        for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification] {
-            NotificationCenter.default.addObserver(self, selector: #selector(frameDidChange),
-                                                   name: name, object: self)
-        }
     }
 
     override var canBecomeKey: Bool { true }
@@ -1423,25 +1404,12 @@ final class QuickChatPanel: NSPanel {
         contentView = glass
     }
 
-    /// AppKit's own zoom, if anything still triggers it, toggles maximize instead.
-    override func zoom(_ sender: Any?) { toggleMaximize() }
+    /// No zoom to fill the screen, whatever asks for it (a double-click where the title bar
+    /// would be, the Window menu): the panel keeps the size you give it.
+    override func zoom(_ sender: Any?) {}
 
     /// Esc (when the page doesn't handle it) hides the panel.
     override func cancelOperation(_ sender: Any?) { onCancel?() }
-
-    /// Fills the screen's visible frame (menu bar and Dock stay visible), or goes back to the
-    /// user's frame from before. The panel stays resizable while maximized.
-    func toggleMaximize() {
-        if let restoreFrame {
-            setOwnFrame(restoreFrame)
-            endMaximize()
-        } else {
-            guard let visible = (screen ?? NSScreen.main)?.visibleFrame else { return }
-            restoreFrame = frame
-            setFrameAutosaveName("") // keep the user's frame as the one restored on relaunch
-            setOwnFrame(visible)
-        }
-    }
 
     /// Gap between the panel and the bottom of the screen's visible area (the Dock, if it's there).
     static let bottomMargin: CGFloat = 16
@@ -1458,43 +1426,17 @@ final class QuickChatPanel: NSPanel {
                       width: size.width, height: size.height)
     }
 
-    /// Back to the bottom center of the panel's screen, keeping its size; from maximized, the
-    /// size it had before. The frame autosave then persists it.
+    /// Back to the bottom center of the panel's screen, keeping its size. The frame autosave
+    /// then persists it.
     func resetPosition() {
         guard let screen = screen ?? NSScreen.main else { return }
-        setOwnFrame(bottomCenterFrame(on: screen, size: (restoreFrame ?? frame).size))
-        if isMaximized { endMaximize() }
+        setFrame(bottomCenterFrame(on: screen, size: frame.size), display: true, animate: true)
     }
 
-    /// Animated frame change that doesn't count as the user moving or resizing the panel.
-    private func setOwnFrame(_ frame: NSRect) {
-        isSettingFrame = true
-        defer { isSettingFrame = false }
-        setFrame(frame, display: true, animate: true)
-    }
-
-    /// Leaves the maximized state as is (frame-wise) and resumes autosaving the current frame.
-    private func endMaximize() {
-        restoreFrame = nil
-        setFrameAutosaveName(Self.autosaveName)
-        saveFrame(usingName: Self.autosaveName)
-    }
-
-    /// The user moved or resized the maximized panel: that frame becomes their own.
-    @objc private func frameDidChange() {
-        if isMaximized, !isSettingFrame { endMaximize() }
-    }
-
-    /// Runs the Reset Position or Maximize action if `event` is its shortcut.
+    /// Runs Reset Position if `event` is its shortcut.
     private func handleLocalShortcut(_ event: NSEvent) -> Bool {
-        guard let pressed = Shortcut(event: event) else { return false }
-        if pressed == resetSizeShortcut {
-            resetPosition()
-        } else if pressed == maximizeShortcut {
-            toggleMaximize()
-        } else {
-            return false
-        }
+        guard let pressed = Shortcut(event: event), pressed == resetSizeShortcut else { return false }
+        resetPosition()
         return true
     }
 

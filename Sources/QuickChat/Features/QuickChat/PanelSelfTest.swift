@@ -103,7 +103,7 @@ enum PanelSelfTest {
         _ = press("n", [.command, .option])
         check(newChats == [true, false], "⌘N → temporary, ⇧⌘N → saved; plain n and ⌥⌘N ignored", "\(newChats)")
 
-        print("6. opens at the bottom center of the screen; ⌘O moves it back there, keeping its size")
+        print("6. opens at the bottom center of the screen; ⌘O moves it back there, keeping its size; nothing fills the screen")
         func atBottomCenter(_ size: NSSize, _ name: String) {
             guard let visible = panel.screen?.visibleFrame else { return check(false, name, "no screen") }
             let f = panel.frame
@@ -114,10 +114,13 @@ enum PanelSelfTest {
         panel.setFrame(NSRect(x: 100, y: 300, width: 600, height: 700), display: false)
         check(press("o", keyCode: 31), "⌘O handled") // kVK_ANSI_O
         atBottomCenter(NSSize(width: 600, height: 700), "⌘O after moving and resizing: back at the bottom center, still 600×700")
-        panel.toggleMaximize()
-        _ = press("o", keyCode: 31)
-        atBottomCenter(NSSize(width: 600, height: 700), "⌘O while maximized: the size from before, at the bottom center")
-        check(!panel.isMaximized, "… and no longer maximized")
+        let before = panel.frame
+        _ = press("f", keyCode: 3) // kVK_ANSI_F, once Maximize
+        panel.zoom(nil)
+        spin(until: { false }, seconds: 0.5)
+        check(panel.frame == before, "⌘F and AppKit's zoom leave the panel's size and place alone", "\(panel.frame)")
+        check(panel.collectionBehavior.contains(.fullScreenNone) && panel.collectionBehavior.contains(.fullScreenDisallowsTiling),
+              "no macOS full screen or tiling")
 
         print("7. links open in the default browser, except chatgpt.com's chats and sign-in pages")
         let inApp = ["https://chatgpt.com/c/123", "https://chatgpt.com/", "https://chatgpt.com/?temporary-chat=true",
@@ -253,16 +256,19 @@ enum PanelSelfTest {
         }
         let dvorakPaste = Shortcut(keyCode: UInt32(kVK_ANSI_Period), carbonModifiers: UInt32(cmdKey), keyLabel: "V")
         check(Shortcut.reservedUse(of: dvorakPaste) == "Paste", "⌘V on another layout (Dvorak's V key) is taken too")
-        for shortcut in [Shortcut.optionSpace, .optionShiftSpace, .optionShiftV, .commandO, .commandF] {
+        for shortcut in [Shortcut.optionSpace, .optionShiftSpace, .optionShiftV, .commandO] {
             check(Shortcut.reservedUse(of: shortcut) == nil, "\(shortcut.displayString) (a default) is free")
         }
 
         print("15. on chatgpt.com: chats are Chat, a chat's title is in the top bar")
         spin(until: { !webView.isLoading && evaluate("document.readyState") as? String == "complete" }, seconds: 20)
         check((evaluate("document.cookie") as? String)?.contains("codex_composer_mode=chat") == true, "Chat mode, not Work")
-        panel.setContentSize(QuickChatPanel.defaultSize) // the narrow layout (section 6 left it at 600 pt)
-        spin(until: { false }, seconds: 0.5)
-        let barEdges = evaluate(#"""
+        // The narrow layout (section 6 left the panel at 600 pt), with chatgpt.com done building
+        // the page: a loaded page can take a while to show its message box, and to lay out again
+        // after the zoom changes above. So these measurements are retried until they settle.
+        panel.setContentSize(QuickChatPanel.defaultSize)
+        spin(until: { evaluate(#"!!document.querySelector('form [contenteditable="true"]')"#) as? Bool == true }, seconds: 20)
+        let barEdgesScript = #"""
             (() => {
               const root = document.documentElement, hidden = root.hasAttribute("data-quick-chat-hide-top-bar");
               root.removeAttribute("data-quick-chat-hide-top-bar");
@@ -275,11 +281,13 @@ enum PanelSelfTest {
               root.toggleAttribute("data-quick-chat-hide-top-bar", hidden);
               return gap;
             })()
-            """#) as? String
+            """#
+        var barEdges: String?
+        spin(until: { barEdges = evaluate(barEdgesScript) as? String; return barEdges == "0 0" }, seconds: 5)
         check(barEdges == "0 0", "the top bar's buttons sit as far from the panel's top and side as the message box from its bottom and side",
               "\(barEdges ?? "nothing") px off (side, top)")
         // The side spacing chatgpt.com gives the chat text and the message box alike: the chat's, and the box's.
-        let sides = evaluate(#"""
+        let sidesScript = #"""
             (() => {
               const probe = parent => {
                 const div = document.createElement("div");
@@ -292,7 +300,9 @@ enum PanelSelfTest {
               const strip = [...document.querySelectorAll('[class~="max-sm:pb-6"]')].find(e => e.querySelector("form") && e.getClientRects().length);
               return [probe(document.body), strip ? probe(strip) : "no message box"].join(" ");
             })()
-            """#) as? String
+            """#
+        var sides: String?
+        spin(until: { sides = evaluate(sidesScript) as? String; return sides == "16px 8px" }, seconds: 5)
         check(sides == "16px 8px", "the chat keeps chatgpt.com's 16px at the sides; the message box sits 8px in",
               "chat, box: \(sides ?? "nothing")")
         let titleInBar = #"getComputedStyle(document.documentElement).getPropertyValue("--quick-chat-title")"#

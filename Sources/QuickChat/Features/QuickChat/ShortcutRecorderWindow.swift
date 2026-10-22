@@ -1,7 +1,7 @@
 import AppKit
 
 /// Small window for choosing Quick Chat's shortcuts: the global toggle, Ask About Selection and
-/// Ask About Clipboard, and the local (panel-focused) Reset Position and Maximize. The
+/// Ask About Clipboard, and the local (panel-focused) Reset Position. The
 /// caller unregisters its global hotkeys while this is open (otherwise the current shortcuts
 /// would be swallowed).
 @MainActor
@@ -11,7 +11,6 @@ final class ShortcutRecorderWindow: NSObject, NSWindowDelegate {
     private let askRecorder = RecorderField()
     private let clipboardRecorder = RecorderField()
     private let resetSizeRecorder = RecorderField()
-    private let maximizeRecorder = RecorderField()
     private let hint = NSTextField(wrappingLabelWithString: "")
     /// Which shortcuts are accepted (mirrors `Shortcut.init?(event:)`); briefly replaced
     /// by the reason when an ineligible combo is pressed.
@@ -21,38 +20,33 @@ final class ShortcutRecorderWindow: NSObject, NSWindowDelegate {
     private var onAskChange: ((Shortcut) -> Void)?
     private var onClipboardChange: ((Shortcut) -> Void)?
     private var onResetSizeChange: ((Shortcut) -> Void)?
-    private var onMaximizeChange: ((Shortcut) -> Void)?
     private var onClose: (() -> Void)?
 
     /// `miniShortcut`: Show Mini's current shortcut, shown as a hint (picking it turns Show Mini off).
     /// `ask`, `clipboard`: the current Ask About Selection and Ask About Clipboard shortcuts.
-    /// `resetSize`, `maximize`: the current local shortcuts. All five shortcuts stay distinct,
-    /// and off the panel's own keys (`Shortcut.reservedUse`).
-    func show(current: Shortcut, ask: Shortcut, clipboard: Shortcut, resetSize: Shortcut, maximize: Shortcut,
+    /// `resetSize`: the current local shortcut. All four shortcuts stay distinct, and off the
+    /// panel's own keys (`Shortcut.reservedUse`).
+    func show(current: Shortcut, ask: Shortcut, clipboard: Shortcut, resetSize: Shortcut,
               miniShortcut: String?,
               onChange: @escaping (Shortcut) -> Void,
               onAskChange: @escaping (Shortcut) -> Void,
               onClipboardChange: @escaping (Shortcut) -> Void,
               onResetSizeChange: @escaping (Shortcut) -> Void,
-              onMaximizeChange: @escaping (Shortcut) -> Void,
               onClose: @escaping () -> Void) {
         self.onChange = onChange
         self.onAskChange = onAskChange
         self.onClipboardChange = onClipboardChange
         self.onResetSizeChange = onResetSizeChange
-        self.onMaximizeChange = onMaximizeChange
         self.onClose = onClose
         recorder.shortcut = current
         askRecorder.shortcut = ask
         clipboardRecorder.shortcut = clipboard
         resetSizeRecorder.shortcut = resetSize
-        maximizeRecorder.shortcut = maximize
         let fields: [(RecorderField, (Shortcut) -> Void)] = [
             (recorder, { [weak self] in self?.onChange?($0) }),
             (askRecorder, { [weak self] in self?.onAskChange?($0) }),
             (clipboardRecorder, { [weak self] in self?.onClipboardChange?($0) }),
             (resetSizeRecorder, { [weak self] in self?.onResetSizeChange?($0) }),
-            (maximizeRecorder, { [weak self] in self?.onMaximizeChange?($0) }),
         ]
         for (field, record) in fields {
             field.validate = { [weak self, unowned field] new in self?.conflict(new, for: field) }
@@ -79,7 +73,7 @@ final class ShortcutRecorderWindow: NSObject, NSWindowDelegate {
 
     func close() { window?.close() }
 
-    /// Why `new` can't go in `field`: the panel or chatgpt.com uses it, or another of the five
+    /// Why `new` can't go in `field`: the panel or chatgpt.com uses it, or another of the four
     /// fields already has it.
     private func conflict(_ new: Shortcut, for field: RecorderField) -> String? {
         if let use = Shortcut.reservedUse(of: new) {
@@ -88,7 +82,6 @@ final class ShortcutRecorderWindow: NSObject, NSWindowDelegate {
         let names: [(RecorderField, String)] = [
             (recorder, "the Quick Chat shortcut"), (askRecorder, "Ask About Selection"),
             (clipboardRecorder, "Ask About Clipboard"), (resetSizeRecorder, "Reset Position"),
-            (maximizeRecorder, "Maximize"),
         ]
         guard let name = names.first(where: { $0.0 !== field && $0.0.shortcut == new })?.1 else { return nil }
         return "\(new.displayString) is already \(name).\nPick another combo, or change that one first."
@@ -115,11 +108,7 @@ final class ShortcutRecorderWindow: NSObject, NSWindowDelegate {
                                                detail: "Works only while Quick Chat is focused.")
         let resetSizeReset = NSButton(title: "Reset to ⌘O", target: self, action: #selector(resetResetSizeToDefault))
         let resetSizeRow = NSStackView(views: [resetSizeRecorder, resetSizeReset])
-        let maximizeLabel = Self.sectionLabel("Maximize / Restore Size",
-                                              detail: "Works only while Quick Chat is focused.")
-        let maximizeReset = NSButton(title: "Reset to ⌘F", target: self, action: #selector(resetMaximizeToDefault))
-        let maximizeRow = NSStackView(views: [maximizeRecorder, maximizeReset])
-        for button in [reset, askReset, clipboardReset, resetSizeReset, maximizeReset] {
+        for button in [reset, askReset, clipboardReset, resetSizeReset] {
             button.setContentHuggingPriority(.required, for: .horizontal)
             button.widthAnchor.constraint(equalToConstant: 140).isActive = true
         }
@@ -130,7 +119,7 @@ final class ShortcutRecorderWindow: NSObject, NSWindowDelegate {
         done.keyEquivalent = "\r"
         let buttons = NSStackView(views: [NSView(), done])
         let stack = NSStackView(views: [label, row, hint, askLabel, askRow, clipboardLabel, clipboardRow,
-                                        resetSizeLabel, resetSizeRow, maximizeLabel, maximizeRow, rules, buttons])
+                                        resetSizeLabel, resetSizeRow, rules, buttons])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 12
@@ -139,10 +128,9 @@ final class ShortcutRecorderWindow: NSObject, NSWindowDelegate {
         stack.setCustomSpacing(18, after: askRow)
         stack.setCustomSpacing(18, after: clipboardRow)
         stack.setCustomSpacing(18, after: resetSizeRow)
-        stack.setCustomSpacing(18, after: maximizeRow)
         stack.edgeInsets = NSEdgeInsets(top: 16, left: 20, bottom: 16, right: 20)
         row.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -40).isActive = true
-        for view in [askRow, clipboardRow, resetSizeRow, maximizeRow, rules, hint, buttons] {
+        for view in [askRow, clipboardRow, resetSizeRow, rules, hint, buttons] {
             view.widthAnchor.constraint(equalTo: row.widthAnchor).isActive = true
         }
         // Wrap at a fixed width so the fitted height is deterministic.
@@ -210,13 +198,6 @@ final class ShortcutRecorderWindow: NSObject, NSWindowDelegate {
         showRules()
         resetSizeRecorder.shortcut = .commandO
         onResetSizeChange?(.commandO)
-    }
-
-    @objc private func resetMaximizeToDefault() {
-        if let reason = maximizeRecorder.validate?(.commandF) { return showRejection(reason) }
-        showRules()
-        maximizeRecorder.shortcut = .commandF
-        onMaximizeChange?(.commandF)
     }
 
     @objc private func finish() { window?.close() }

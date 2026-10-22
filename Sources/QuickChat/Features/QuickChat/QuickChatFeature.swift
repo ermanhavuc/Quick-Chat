@@ -75,7 +75,7 @@ final class QuickChatFeature: Feature {
     private func registerAsk(_ name: String, _ shortcut: Shortcut, _ handler: @escaping @MainActor () -> Void) -> GlobalHotKey? {
         let others: [(String, Shortcut)] = [("Quick Chat", self.shortcut), ("Ask About Selection", askShortcut),
                                             ("Ask About Clipboard", clipboardShortcut),
-                                            ("Reset Position", chat.resetSizeShortcut), ("Maximize", chat.maximizeShortcut)]
+                                            ("Reset Position", chat.resetSizeShortcut)]
         do {
             if let other = others.first(where: { $0.0 != name && $0.1 == shortcut })?.0 {
                 throw FeatureError("\(shortcut.displayString) is already \(other).",
@@ -164,9 +164,8 @@ final class QuickChatFeature: Feature {
         let previousAsk = askShortcut
         let previousClipboard = clipboardShortcut
         let previousResetSize = chat.resetSizeShortcut
-        let previousMaximize = chat.maximizeShortcut
         recorder.show(current: shortcut, ask: askShortcut, clipboard: clipboardShortcut, resetSize: chat.resetSizeShortcut,
-                      maximize: chat.maximizeShortcut, miniShortcut: showMini.userShortcutDescription, onChange: { [weak self] new in
+                      miniShortcut: showMini.userShortcutDescription, onChange: { [weak self] new in
             self?.shortcut = new
         }, onAskChange: { [weak self] new in
             self?.askShortcut = new
@@ -175,9 +174,6 @@ final class QuickChatFeature: Feature {
         }, onResetSizeChange: { [weak self] new in
             self?.chat.resetSizeShortcut = new
             new.saveAsResetSize()
-        }, onMaximizeChange: { [weak self] new in
-            self?.chat.maximizeShortcut = new
-            new.saveAsMaximize()
         }, onClose: { [weak self] in
             guard let self, self.isEnabled else { return }
             do {
@@ -191,14 +187,12 @@ final class QuickChatFeature: Feature {
                 self.showMini.offerRestartIfNeeded()
             } catch {
                 self.log.error("Shortcut rejected: \(error.localizedDescription, privacy: .public)")
-                // Put all five back as they were, which keeps them distinct.
+                // Put all four back as they were, which keeps them distinct.
                 self.shortcut = previous
                 self.askShortcut = previousAsk
                 self.clipboardShortcut = previousClipboard
                 self.chat.resetSizeShortcut = previousResetSize
                 previousResetSize.saveAsResetSize()
-                self.chat.maximizeShortcut = previousMaximize
-                previousMaximize.saveAsMaximize()
                 try? self.registerHotKey()
                 NSApp.activate()
                 NSAlert(error: error).runModal()
