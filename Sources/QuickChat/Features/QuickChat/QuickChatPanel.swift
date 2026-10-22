@@ -78,29 +78,12 @@ final class QuickChatController: NSObject {
         content?.showToast(text, symbol: symbol, action: action)
     }
 
-    static let hidesTopBarDefaultsKey = "quickChat.hidesTopBar"
-
-    /// Whether chatgpt.com's top bar is hidden (see `hideTopBarCSS`); it is by default. Remembered
-    /// across launches.
-    private(set) var hidesTopBar = UserDefaults.standard.object(forKey: hidesTopBarDefaultsKey) as? Bool ?? true {
-        didSet {
-            UserDefaults.standard.set(hidesTopBar, forKey: Self.hidesTopBarDefaultsKey)
-            updateFirstClickBand()
-            guard let webView else { return }
-            addUserScripts(to: webView.configuration.userContentController) // for the next page loads
-            webView.evaluateJavaScript(Self.topBarScript(hidden: hidesTopBar))
-        }
-    }
-
-    /// ⌘\: shows or hides chatgpt.com's top bar.
-    func toggleTopBar() { hidesTopBar.toggle() }
-
     /// chatgpt.com's top bar height (its --height-toolbar), in CSS pixels.
     static let topBarHeight: CGFloat = 52
 
-    /// While the top bar is shown, a first click on its band reaches the page (see `QuickChatWebView`).
+    /// A first click on the top bar's band reaches the page (see `QuickChatWebView`).
     private func updateFirstClickBand() {
-        webView?.firstClickBand = hidesTopBar ? 0 : Self.topBarHeight * pageZoom
+        webView?.firstClickBand = Self.topBarHeight * pageZoom
     }
 
     /// ⌘N / ⇧⌘N: a new saved chat, or a new temporary one (chatgpt.com's `?temporary-chat=true`).
@@ -463,7 +446,6 @@ final class QuickChatController: NSObject {
         panel.onZoom = { [weak self] in self?.zoom($0) }
         panel.onEffort = { [weak self] in self?.stepEffort($0) }
         panel.onNewChat = { [weak self] in self?.newChat(temporary: $0) }
-        panel.onToggleTopBar = { [weak self] in self?.toggleTopBar() }
         panel.onFind = { [weak self] in self?.find($0) }
         panel.onOpenInBrowser = { [weak self] in self?.openChatInBrowser() }
         panel.resetSizeShortcut = resetSizeShortcut
@@ -529,7 +511,7 @@ final class QuickChatController: NSObject {
         let webView = QuickChatWebView(frame: .zero, configuration: config)
         webView.customUserAgent = Self.safariUserAgent
         webView.pageZoom = pageZoom
-        webView.firstClickBand = hidesTopBar ? 0 : Self.topBarHeight * pageZoom
+        webView.firstClickBand = Self.topBarHeight * pageZoom
         webView.uiDelegate = self
         webView.navigationDelegate = self
         webView.allowsBackForwardNavigationGestures = true
@@ -537,12 +519,9 @@ final class QuickChatController: NSObject {
         return webView
     }
 
-    /// The page touch-ups, run at the start of every chatgpt.com page load. Replaces the earlier
-    /// ones, so `hidesTopBar` changes reach the next load.
+    /// The page touch-ups, run at the start of every chatgpt.com page load.
     private func addUserScripts(to controller: WKUserContentController) {
-        controller.removeAllUserScripts()
-        for source in [Self.pageStyleScript, Self.topBarScript(hidden: hidesTopBar), Self.dragScript, Self.chatOnlyScript,
-                       Self.shareInMenuScript, Self.readyScript] {
+        for source in [Self.pageStyleScript, Self.dragScript, Self.chatOnlyScript, Self.shareInMenuScript, Self.readyScript] {
             controller.addUserScript(WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         }
     }
@@ -626,8 +605,8 @@ final class QuickChatController: NSObject {
     ///   16px, so the scroll area is the panel minus the variable, plus 16px.
     /// - Text in a chat stopped at the scroll area's edges as if cut off. It now fades out over
     ///   16px: at the bottom, in the gap above the message box; at the top, from where the
-    ///   scroll area starts (`--quick-chat-fade-top`: the top bar's buttons when the bar is
-    ///   shown, see `glassCSS`), in its padding, so a chat's first message isn't faded.
+    ///   scroll area starts (`--quick-chat-fade-top`: the top bar's buttons, see `glassCSS`), in
+    ///   its padding, so a chat's first message isn't faded.
     ///   The scroll area itself can't take the mask: WebKit then also hides the message box,
     ///   which sits inside it in the page but is placed (and drawn) below it. So the mask goes
     ///   on its parent, which holds both and doesn't scroll, and is opaque again from the
@@ -673,8 +652,8 @@ final class QuickChatController: NSObject {
     /// - The message box and the top bar's buttons get a see-through white fill: 7% in Dark mode,
     ///   70% in Light mode (chatgpt.com's solid white box looked pasted on). Menus, dialogs and
     ///   the narrow layout's sliding sidebar keep their solid Mac colors.
-    /// - With the top bar shown (⌘\), a chat's scroll area starts at its buttons' bottom edge,
-    ///   so text doesn't run behind the see-through bar, and mirrors the message box: a chat
+    /// - A chat's scroll area starts at the top bar's buttons' bottom edge, so text doesn't run
+    ///   behind the see-through bar, and mirrors the message box: a chat
     ///   starts 16px under the buttons, and its text fades out in that gap. chatgpt.com's
     ///   floating inset is 16px under the buttons; in the layout that starts the content frame
     ///   below the bar (it's 8px there), the scroll area's parent moves up to reach them.
@@ -695,12 +674,12 @@ final class QuickChatController: NSObject {
         header.draggable [class~="bg-surface"], header.draggable [class~="browser:bg-surface"] {
           background-color: var(--quick-chat-glass-fill);
         }
-        :root:not([data-quick-chat-hide-top-bar]) main:has(> header.draggable) .thread-scroll-container {
+        main:has(> header.draggable) .thread-scroll-container {
           margin-top: var(--quick-chat-fade-top);
           padding-top: 1rem;
           max-height: calc(100% - var(--thread-scroll-padding-bottom, 0px) + 1rem - var(--quick-chat-fade-top));
         }
-        :root:not([data-quick-chat-hide-top-bar]) main:has(> header.draggable) :has(> .thread-scroll-container) {
+        main:has(> header.draggable) :has(> .thread-scroll-container) {
           --quick-chat-fade-top: max(0px, calc(var(--thread-floating-content-top-inset, 60px) - 1rem));
           margin-top: min(0px, calc(var(--thread-floating-content-top-inset, 60px) - 1rem));
         }
@@ -719,20 +698,7 @@ final class QuickChatController: NSObject {
         }
         """
 
-    /// While `hidesTopBar` is on (the root element has `data-quick-chat-hide-top-bar`), the top
-    /// bar is gone: its sidebar button (⇧⌘S does the same), Chat/Work switch, temporary chat
-    /// button (⇧⌘N), and in a chat its New chat and More buttons (Share is in More's menu,
-    /// `shareInMenuScript`). The content frame's margin that made room for the bar goes too, so
-    /// a chat scrolls to the panel's top edge.
-    /// Pages without this bar, like the signed-out page with its Log in button, are unaffected.
-    private static let hideTopBarCSS = """
-        [data-quick-chat-hide-top-bar] main > header.draggable { display: none; }
-        [data-quick-chat-hide-top-bar] main:has(> header.draggable) [class*="MainContentFrame-"] {
-          --app-shell-main-content-frame-top-offset: 0px;
-        }
-        """
-
-    /// With the top bar shown, a chat's title (`--quick-chat-title`, set by `chatOnlyScript`)
+    /// A chat's title (`--quick-chat-title`, set by `chatOnlyScript`)
     /// sits centered between its buttons, cut short with "…" when it doesn't fit, as in a
     /// window's title bar. Pressing it drags the panel, as around it. The bar's slot for page
     /// content takes half the room in a temporary chat though it's empty, so an empty one goes.
@@ -763,7 +729,7 @@ final class QuickChatController: NSObject {
 
     /// The page's touch-ups, with `glassCSS` where the panel is Liquid Glass.
     private static var pageCSS: String {
-        let css = macColorsCSS + pageLayoutCSS + chatOnlyCSS + chatTitleCSS + shareInMenuCSS + hideTopBarCSS
+        let css = macColorsCSS + pageLayoutCSS + chatOnlyCSS + chatTitleCSS + shareInMenuCSS
         if #available(macOS 26, *) { return css + glassCSS }
         return css
     }
@@ -789,11 +755,6 @@ final class QuickChatController: NSObject {
           }).observe(document, {subtree: true, childList: true, attributes: true, attributeFilter: ["style"]});
         }
         """
-
-    /// Turns `hideTopBarCSS` on or off for the page.
-    private static func topBarScript(hidden: Bool) -> String {
-        #"if (location.hostname === "chatgpt.com") document.documentElement.toggleAttribute("data-quick-chat-hide-top-bar", \#(hidden));"#
-    }
 
     private static let dragMessage = "quickChatDragPanel"
     private static let openInBrowserMessage = "quickChatOpenInBrowser"
@@ -1132,10 +1093,9 @@ extension QuickChatController: WKUIDelegate, WKNavigationDelegate, WKDownloadDel
         download.delegate = self
     }
 
-    /// A new page in the panel: hidden until it's built (`coverUntilReady`). Popups share the
-    /// panel's page scripts but not its ⌘\, so they keep chatgpt.com's top bar.
+    /// A new page in the panel: hidden until it's built (`coverUntilReady`).
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
-        if webView === self.webView { coverUntilReady() } else { webView.evaluateJavaScript(Self.topBarScript(hidden: false)) }
+        if webView === self.webView { coverUntilReady() }
     }
 
     /// The panel's page is loaded: one that isn't chatgpt.com (signing in) shows now;
@@ -1224,7 +1184,7 @@ extension QuickChatController: WKUIDelegate, WKNavigationDelegate, WKDownloadDel
 /// (`QuickChatController.dragScript`) and its buttons work at once, as a window's title bar and
 /// toolbar do.
 final class QuickChatWebView: WKWebView {
-    /// Height in points from the top edge; 0 while the top bar is hidden.
+    /// Height in points from the top edge: the top bar's.
     var firstClickBand: CGFloat = 0
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
@@ -1499,8 +1459,6 @@ final class QuickChatPanel: NSPanel {
     var onEffort: ((Int) -> Void)?
     /// ⌘N / ⇧⌘N: new chat; `true` for a temporary one (⇧⌘N).
     var onNewChat: ((Bool) -> Void)?
-    /// ⌘\: show or hide chatgpt.com's top bar.
-    var onToggleTopBar: (() -> Void)?
     /// ⇧⌘F / ⌘G / ⇧⌘G: show the find bar, find the next / previous match.
     var onFind: ((NSTextFinder.Action) -> Void)?
     /// ⇧⌘B: open the chat in the default browser.
@@ -1613,7 +1571,7 @@ final class QuickChatPanel: NSPanel {
     override func close() { onCancel?() }
 
     /// ⌘W hides, ⌘N / ⇧⌘N start a saved / temporary chat, ⌘− / ⌘= / ⌘0 zoom, ⌘[ / ⌘] change the
-    /// thinking effort, ⌘\ shows or hides the top bar, ⇧⌘F / ⌘G / ⇧⌘G find and ⇧⌘B opens the
+    /// thinking effort, ⇧⌘F / ⌘G / ⇧⌘G find and ⇧⌘B opens the
     /// chat in the browser; the local shortcuts are caught here too, ahead of the web view
     /// (which otherwise claims ⌘ combos). `Shortcut.reservedUse` lists these.
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
@@ -1626,10 +1584,6 @@ final class QuickChatPanel: NSPanel {
         let flags = event.modifierFlags.intersection([.shift, .control, .option, .command])
         if event.charactersIgnoringModifiers?.lowercased() == "n", flags == .command || flags == [.command, .shift] {
             onNewChat?(flags.contains(.shift))
-            return true
-        }
-        if flags == .command, event.charactersIgnoringModifiers == "\\" {
-            onToggleTopBar?()
             return true
         }
         switch (event.charactersIgnoringModifiers?.lowercased(), flags) {

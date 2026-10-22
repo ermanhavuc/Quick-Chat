@@ -89,7 +89,7 @@ struct Shortcut: Codable, Equatable {
             (kVK_ANSI_N, "n", cmd | shift, "New Temporary Chat"), (kVK_ANSI_Minus, "-", cmd, "Zoom Out"),
             (kVK_ANSI_Equal, "=", cmd, "Zoom In"), (kVK_ANSI_Equal, "+", cmd | shift, "Zoom In"),
             (kVK_ANSI_0, "0", cmd, "Actual Size"), (kVK_ANSI_LeftBracket, "[", cmd, "Less Thinking"),
-            (kVK_ANSI_RightBracket, "]", cmd, "More Thinking"), (kVK_ANSI_Backslash, "\\", cmd, "Show or Hide the Top Bar"),
+            (kVK_ANSI_RightBracket, "]", cmd, "More Thinking"),
             (kVK_ANSI_F, "f", cmd | shift, "Find"), (kVK_ANSI_G, "g", cmd, "Find Next"),
             (kVK_ANSI_G, "g", cmd | shift, "Find Previous"), (kVK_ANSI_B, "b", cmd | shift, "Open Chat in Browser"),
             (kVK_ANSI_Z, "z", cmd, "Undo"), (kVK_ANSI_Z, "z", cmd | shift, "Redo"), (kVK_ANSI_X, "x", cmd, "Cut"),

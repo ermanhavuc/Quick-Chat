@@ -22,11 +22,10 @@ enum PanelSelfTest {
     }
 
     static func run() -> Bool {
-        // Start from the default zoom and top bar and no saved panel frame; put the saved ones
-        // back afterwards.
+        // Start from the default zoom and no saved panel frame; put the saved ones back afterwards.
         let defaults = UserDefaults.standard, zoomKey = QuickChatController.pageZoomDefaultsKey
-        let frameKey = "NSWindow Frame \(QuickChatPanel.autosaveName)", topBarKey = QuickChatController.hidesTopBarDefaultsKey
-        let saved = [zoomKey, frameKey, topBarKey].map { ($0, defaults.object(forKey: $0)) }
+        let frameKey = "NSWindow Frame \(QuickChatPanel.autosaveName)"
+        let saved = [zoomKey, frameKey].map { ($0, defaults.object(forKey: $0)) }
         for (key, _) in saved { defaults.removeObject(forKey: key) }
         defer { for (key, value) in saved { defaults.set(value, forKey: key) } }
 
@@ -138,17 +137,9 @@ enum PanelSelfTest {
         for link in inApp { check(QuickChatController.opensInApp(URL(string: link)), "in app: \(link)") }
         for link in inBrowser { check(!QuickChatController.opensInApp(URL(string: link)), "browser: \(link)") }
 
-        print("8. ⌘\\ shows or hides chatgpt.com's top bar, remembered")
-        func topBar(hidden: Bool, _ name: String) {
-            let scripts = webView.configuration.userContentController.userScripts.map(\.source)
-            let flag = scripts.first { $0.contains("toggleAttribute(\"data-quick-chat-hide-top-bar\"") }
-            let saved = defaults.object(forKey: topBarKey) as? Bool ?? true // nothing saved yet: the default
-            check(chat.hidesTopBar == hidden && saved == hidden && scripts.count == 6
-                  && flag?.hasSuffix(", \(hidden));") == true, name, "\(scripts.count) scripts, flag: \(flag ?? "none")")
-        }
-        topBar(hidden: true, "hidden by default")
-        check(press("\\"), "⌘\\ handled")
-        topBar(hidden: false, "⌘\\ → shown (next page loads too)")
+        print("8. a first click on chatgpt.com's top bar reaches the page")
+        let scripts = webView.configuration.userContentController.userScripts
+        check(scripts.count == 5, "the page scripts are in place", "\(scripts.count) scripts")
         func firstClick(_ fromTop: CGFloat) -> Bool {
             let event = NSEvent.mouseEvent(with: .leftMouseDown, location: NSPoint(x: 80, y: frameView.bounds.maxY - fromTop),
                                            modifierFlags: [], timestamp: 0, windowNumber: panel.windowNumber, context: nil,
@@ -157,13 +148,7 @@ enum PanelSelfTest {
         }
         let band = QuickChatController.topBarHeight * webView.pageZoom
         check((webView as? QuickChatWebView)?.firstClickBand == band && firstClick(4) && firstClick(band - 2),
-              "a first click on the shown top bar reaches the page (it drags the panel)", "band \((webView as? QuickChatWebView)?.firstClickBand ?? -1)")
-        _ = press("\\")
-        topBar(hidden: true, "⌘\\ again → hidden")
-        check((webView as? QuickChatWebView)?.firstClickBand == 0, "… and first clicks there only activate the panel again")
-        _ = press("\\", [])
-        _ = press("\\", [.command, .option])
-        topBar(hidden: true, "plain \\ and ⌥⌘\\ ignored")
+              "a first click on the top bar reaches the page (it drags the panel)", "band \((webView as? QuickChatWebView)?.firstClickBand ?? -1)")
 
         print("9. Ask About Selection puts the clipboard back as it was")
         let board = NSPasteboard(name: .init("QuickChat.SelfTest"))
@@ -272,15 +257,12 @@ enum PanelSelfTest {
         spin(until: { evaluate(#"!!document.querySelector('form [contenteditable="true"]')"#) as? Bool == true }, seconds: 20)
         let barEdgesScript = #"""
             (() => {
-              const root = document.documentElement, hidden = root.hasAttribute("data-quick-chat-hide-top-bar");
-              root.removeAttribute("data-quick-chat-hide-top-bar");
               const shown = e => e.getClientRects().length && getComputedStyle(e).visibility !== "hidden";
               const bar = [...document.querySelectorAll("main > header.draggable")].find(shown);
               const button = bar && [...bar.querySelectorAll("button")].filter(shown).at(-1);
               const box = [...document.querySelectorAll('form [class*="ComposerLayoutRoot-"]')].filter(shown).pop();
               const [b, m] = [button?.getBoundingClientRect(), box?.getBoundingClientRect()];
               const gap = b && m ? [m.right - b.right, b.top - (innerHeight - m.bottom)].map(d => Math.abs(d).toFixed(0)).join(" ") : "no bar";
-              root.toggleAttribute("data-quick-chat-hide-top-bar", hidden);
               return gap;
             })()
             """#
