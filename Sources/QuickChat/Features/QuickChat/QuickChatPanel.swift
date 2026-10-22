@@ -376,6 +376,7 @@ final class QuickChatController: NSObject {
         config.mediaTypesRequiringUserActionForPlayback = []
         addUserScripts(to: config.userContentController)
         config.userContentController.add(self, name: Self.dragMessage)
+        config.userContentController.add(self, name: Self.openInBrowserMessage)
         let webView = QuickChatWebView(frame: .zero, configuration: config)
         webView.customUserAgent = Self.safariUserAgent
         webView.pageZoom = pageZoom
@@ -391,7 +392,7 @@ final class QuickChatController: NSObject {
     /// ones, so `hidesTopBar` changes reach the next load.
     private func addUserScripts(to controller: WKUserContentController) {
         controller.removeAllUserScripts()
-        for source in [Self.pageStyleScript, Self.topBarScript(hidden: hidesTopBar), Self.dragScript] {
+        for source in [Self.pageStyleScript, Self.topBarScript(hidden: hidesTopBar), Self.dragScript, Self.chatOnlyScript] {
             controller.addUserScript(WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         }
     }
@@ -510,6 +511,19 @@ final class QuickChatController: NSObject {
         }
         """
 
+    /// Quick Chat is just chats (see `chatOnlyScript`), so chatgpt.com's sidebar is gone: its
+    /// button in the top bar, the sidebar that slides in over the chat (with its dimmed
+    /// backdrop), and in the wide layout (⌘F) the side panel with its icon rail. The Chat/Work
+    /// switch on the new-chat page goes too. A group of top bar buttons is hidden only if the
+    /// sidebar button is all it holds (in a chat, New chat sits beside it).
+    private static let chatOnlyCSS = """
+        header.draggable .no-drag:has(button[aria-controls="browser-sidebar-popover"]):not(:has(button:not([aria-controls="browser-sidebar-popover"]))),
+        #browser-sidebar-popover, .codex-dialog-overlay:has(~ #browser-sidebar-popover),
+        aside.app-shell-left-panel, [class~="@container/home-mode-toggle"] {
+          display: none;
+        }
+        """
+
     /// While `hidesTopBar` is on (the root element has `data-quick-chat-hide-top-bar`), the top
     /// bar is gone: its sidebar button (⇧⌘S does the same), Chat/Work switch, temporary chat
     /// button (⇧⌘N), and in a chat its New chat, Share and More buttons. The content frame's
@@ -524,7 +538,7 @@ final class QuickChatController: NSObject {
 
     /// The page's touch-ups, with `glassCSS` where the panel is Liquid Glass.
     private static var pageCSS: String {
-        let css = macColorsCSS + pageLayoutCSS + hideTopBarCSS
+        let css = macColorsCSS + pageLayoutCSS + chatOnlyCSS + hideTopBarCSS
         if #available(macOS 26, *) { return css + glassCSS }
         return css
     }
@@ -545,6 +559,42 @@ final class QuickChatController: NSObject {
     }
 
     private static let dragMessage = "quickChatDragPanel"
+    private static let openInBrowserMessage = "quickChatOpenInBrowser"
+
+    /// Keeps the panel to chats (`isChatPath`): a link to another chatgpt.com page, or the page
+    /// moving there itself (it routes in place, without a page load the app would see), opens it
+    /// in the default browser instead, and the panel goes back. ⇧⌘S (chatgpt.com's sidebar key)
+    /// does nothing, as the sidebar is gone (`chatOnlyCSS`).
+    private static let chatOnlyScript = """
+        if (location.hostname === "chatgpt.com") {
+          const isChatPath = path => path === "/" || path.startsWith("/c/") || path.startsWith("/auth/");
+          const outside = href => {
+            const url = new URL(href, location.href);
+            return url.hostname === "chatgpt.com" && !isChatPath(url.pathname) ? url : null;
+          };
+          const openInBrowser = url => webkit.messageHandlers.\(openInBrowserMessage).postMessage(url.href);
+          addEventListener("click", event => {
+            const link = event.target.closest?.("a[href]");
+            const url = link && event.button === 0 && outside(link.href);
+            if (!url) return;
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            openInBrowser(url);
+          }, true);
+          const pushState = history.pushState;
+          history.pushState = function (state, title, href) {
+            pushState.apply(this, arguments);
+            const url = href != null && outside(href);
+            if (url) { openInBrowser(url); history.back(); }
+          };
+          addEventListener("keydown", event => {
+            if (event.metaKey && event.shiftKey && !event.altKey && !event.ctrlKey && event.key.toLowerCase() === "s") {
+              event.preventDefault();
+              event.stopImmediatePropagation();
+            }
+          }, true);
+        }
+        """
 
     /// Lets chatgpt.com's top bar move the panel, as a title bar would: a press on its empty parts
     /// (around and between its buttons) asks the panel to drag (`QuickChatPanel.dragFromPage`).
@@ -597,17 +647,25 @@ final class QuickChatController: NSObject {
         return candidate
     }
 
-    /// Whether a link to `url` opens inside Quick Chat (chatgpt.com and sign-in pages, in the panel
-    /// or a popup) rather than in the default browser, or the default app for e.g. mailto: links.
-    /// Redirects and scripted navigations aren't links and always stay, as sign-ins pass through
-    /// other hosts.
+    /// Whether a link to `url` opens inside Quick Chat (chatgpt.com's chats and sign-in pages, in
+    /// the panel or a popup) rather than in the default browser, or the default app for e.g.
+    /// mailto: links. Redirects and scripted navigations aren't links and always stay, as sign-ins
+    /// pass through other hosts.
     static func opensInApp(_ url: URL?) -> Bool {
         guard let url, let scheme = url.scheme?.lowercased() else { return true }
         guard scheme == "https" || scheme == "http" else {
             return ["about", "blob", "data", "javascript"].contains(scheme) // page-internal, not for other apps
         }
         let host = url.host?.lowercased() ?? ""
-        return isChatGPTHost(host) || signInHosts.contains { host == $0 || host.hasSuffix("." + $0) }
+        if host == "chatgpt.com" { return isChatPath(url.path) }
+        return signInHosts.contains { host == $0 || host.hasSuffix("." + $0) }
+    }
+
+    /// chatgpt.com's pages that belong in Quick Chat: a new chat (`/`, also temporary), a chat
+    /// (`/c/…`) and sign-in (`/auth/…`). GPTs, Library, Codex, projects and the rest open in the
+    /// browser (see `chatOnlyScript`). Keep in sync with `chatOnlyScript`'s `isChatPath`.
+    static func isChatPath(_ path: String) -> Bool {
+        path.isEmpty || path == "/" || path.hasPrefix("/c/") || path.hasPrefix("/auth/")
     }
 }
 
@@ -625,10 +683,20 @@ extension QuickChatController: NSWindowDelegate {
 // MARK: - Messages from the page
 
 extension QuickChatController: WKScriptMessageHandler {
-    /// `dragScript`: a press on the panel's top bar, away from its buttons.
+    /// `dragScript`: a press on the panel's top bar, away from its buttons. `chatOnlyScript`: a
+    /// chatgpt.com page that isn't a chat, for the default browser (nothing else is opened).
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard message.name == Self.dragMessage, message.webView === webView else { return }
-        panel?.dragFromPage()
+        guard message.webView === webView else { return }
+        switch message.name {
+        case Self.dragMessage:
+            panel?.dragFromPage()
+        case Self.openInBrowserMessage:
+            guard let href = message.body as? String, let url = URL(string: href), url.scheme == "https",
+                  url.host?.lowercased() == "chatgpt.com", !Self.isChatPath(url.path) else { return }
+            NSWorkspace.shared.open(url)
+        default:
+            break
+        }
     }
 }
 

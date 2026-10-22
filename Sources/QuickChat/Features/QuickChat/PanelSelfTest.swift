@@ -110,12 +110,15 @@ enum PanelSelfTest {
         atBottomCenter("⌘O while maximized")
         check(!panel.isMaximized, "… and no longer maximized")
 
-        print("7. links open in the default browser, except chatgpt.com and sign-in pages")
-        let inApp = ["https://chatgpt.com/c/123", "https://chatgpt.com/auth/login_with?connection=google-oauth2",
-                     "https://help.chatgpt.com/x", "https://auth.openai.com/log-in", "https://accounts.google.com/o/oauth2",
+        print("7. links open in the default browser, except chatgpt.com's chats and sign-in pages")
+        let inApp = ["https://chatgpt.com/c/123", "https://chatgpt.com/", "https://chatgpt.com/?temporary-chat=true",
+                     "https://chatgpt.com", "https://chatgpt.com/auth/login_with?connection=google-oauth2",
+                     "https://auth.openai.com/log-in", "https://accounts.google.com/o/oauth2",
                      "https://appleid.apple.com/auth/authorize", "https://login.microsoftonline.com/common",
                      "about:blank", "blob:https://chatgpt.com/abc"]
-        let inBrowser = ["https://openai.com/terms", "https://help.openai.com/en/articles/1", "https://www.google.com/search?q=x",
+        let inBrowser = ["https://chatgpt.com/gpts", "https://chatgpt.com/library", "https://chatgpt.com/codex",
+                         "https://chatgpt.com/g/g-abc/c/123", "https://help.chatgpt.com/x",
+                         "https://openai.com/terms", "https://help.openai.com/en/articles/1", "https://www.google.com/search?q=x",
                          "https://support.apple.com/kb", "https://learn.microsoft.com/x", "https://notchatgpt.com/",
                          "https://example.com/", "http://example.com/", "mailto:someone@example.com"]
         for link in inApp { check(QuickChatController.opensInApp(URL(string: link)), "in app: \(link)") }
@@ -126,7 +129,7 @@ enum PanelSelfTest {
             let scripts = webView.configuration.userContentController.userScripts.map(\.source)
             let flag = scripts.first { $0.contains("toggleAttribute(\"data-quick-chat-hide-top-bar\"") }
             let saved = defaults.object(forKey: topBarKey) as? Bool ?? true // nothing saved yet: the default
-            check(chat.hidesTopBar == hidden && saved == hidden && scripts.count == 3
+            check(chat.hidesTopBar == hidden && saved == hidden && scripts.count == 4
                   && flag?.hasSuffix(", \(hidden));") == true, name, "\(scripts.count) scripts, flag: \(flag ?? "none")")
         }
         topBar(hidden: true, "hidden by default")
