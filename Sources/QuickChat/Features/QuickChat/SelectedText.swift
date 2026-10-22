@@ -6,15 +6,16 @@ import Carbon.HIToolbox
 /// needs Accessibility access (`Permissions.checkAccessibility`).
 @MainActor
 enum SelectedText {
-    /// The selected text, or nil if nothing was copied (no selection, no text in it, or another
-    /// app came to the front in the meantime). An app that takes over a second to copy leaves
-    /// the selection on the clipboard.
+    /// The selected text, or nil if nothing was copied (no selection, no text in it, another app
+    /// came to the front in the meantime, or the shortcut's keys were held for over a second).
+    /// An app that takes over a second to copy leaves the selection on the clipboard.
     static func copy() async -> String? {
         let app = NSWorkspace.shared.frontmostApplication
         // The shortcut's own modifiers may still be down: ⌥ with ⌘C is another command
         // (in Chrome and Brave, Inspect Element), so wait until they're released.
-        await waitUntil(timeout: 1) { CGEventSource.flagsState(.combinedSessionState).isDisjoint(with: modifiers) }
-        guard NSWorkspace.shared.frontmostApplication == app else { return nil }
+        let released = { CGEventSource.flagsState(.combinedSessionState).isDisjoint(with: modifiers) }
+        await waitUntil(timeout: 1, released)
+        guard released(), NSWorkspace.shared.frontmostApplication == app else { return nil }
         let pasteboard = NSPasteboard.general
         let saved = PasteboardSnapshot(pasteboard)
         let before = pasteboard.changeCount

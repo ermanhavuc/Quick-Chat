@@ -1,5 +1,6 @@
 #if DEBUG
 import AppKit
+import Carbon.HIToolbox
 import WebKit
 
 /// Self-test of the Quick Chat panel's layout (opens a real panel, so it needs a GUI session):
@@ -7,9 +8,17 @@ import WebKit
 @MainActor
 enum PanelSelfTest {
     private static var failures = 0
+    /// `QuickChatController.unseenAnswerDidChange` posts seen by section 16.
+    private static var unseenPosts = 0
 
     private static func check(_ cond: Bool, _ name: String, _ detail: @autoclosure () -> String = "") {
         if cond { print("  ok   \(name)") } else { failures += 1; print("  FAIL \(name) \(detail())") }
+    }
+
+    /// Runs the main run loop until `done` or `seconds` pass.
+    private static func spin(until done: () -> Bool, seconds: TimeInterval) {
+        let deadline = Date(timeIntervalSinceNow: seconds)
+        while !done(), Date() < deadline { RunLoop.main.run(mode: .default, before: Date(timeIntervalSinceNow: 0.05)) }
     }
 
     static func run() -> Bool {
@@ -179,14 +188,104 @@ enum PanelSelfTest {
         let pageStyle = webView.configuration.userContentController.userScripts.first?.source ?? ""
         if #available(macOS 26, *) {
             let glass = panel.contentView as? NSGlassEffectView
-            check(glass?.contentView === webView, "the web view sits on a glass view", "\(panel.contentView.map { "\(type(of: $0))" } ?? "nil")")
+            check((glass?.contentView as? QuickChatContentView)?.webView === webView, "the web view sits on a glass view",
+                  "\(panel.contentView.map { "\(type(of: $0))" } ?? "nil")")
             check(!panel.isOpaque && panel.backgroundColor == .clear, "the panel is see-through")
             check(webView.value(forKey: "drawsBackground") as? Bool == false, "the web view draws no background")
             check(pageStyle.contains("--quick-chat-glass-fill"), "the page style has the glass rules")
         } else {
-            check(panel.contentView === webView && panel.isOpaque, "a solid panel")
+            check((panel.contentView as? QuickChatContentView)?.webView === webView && panel.isOpaque, "a solid panel")
             check(!pageStyle.contains("--quick-chat-glass-fill"), "no glass rules in the page style")
         }
+
+        guard let content = webView.superview as? QuickChatContentView else {
+            print("panel self-test: FAILED (the web view isn't in a QuickChatContentView)")
+            return false
+        }
+        func evaluate(_ js: String) -> Any? {
+            var result: Any?, done = false
+            webView.evaluateJavaScript(js) { value, _ in result = value; done = true }
+            spin(until: { done }, seconds: 3)
+            return result
+        }
+
+        print("11. zoom and thinking effort say what they did")
+        _ = press("0")
+        _ = press("=")
+        check(content.toastText == "Zoom 100%", "⌘= → \"Zoom 100%\"", content.toastText ?? "no toast")
+        for _ in 0..<10 { _ = press("=") }
+        check(content.toastText == "Zoom 200%, the largest", "at 200%, ⌘= says it's the largest", content.toastText ?? "no toast")
+        _ = press("0")
+        check(content.toastText == "Zoom 90%", "⌘0 → \"Zoom 90%\"", content.toastText ?? "no toast")
+
+        print("12. ⇧⌘F finds in the chat, in AppKit's find bar above the page")
+        var findActions: [NSTextFinder.Action] = []
+        let find = panel.onFind
+        panel.onFind = { findActions.append($0) }
+        check(press("F", [.command, .shift]) && press("g") && press("G", [.command, .shift]) && press("B", [.command, .shift]),
+              "⇧⌘F, ⌘G, ⇧⌘G and ⇧⌘B handled")
+        _ = press("f", [.command, .option])
+        check(findActions == [.showFindInterface, .nextMatch, .previousMatch], "⇧⌘F → find bar, ⌘G → next, ⇧⌘G → previous; ⌥⌘F ignored",
+              "\(findActions.map(\.rawValue))")
+        panel.onFind = find
+        _ = press("F", [.command, .shift])
+        let bar = content.findBarView?.frame ?? .zero
+        check(content.isFindBarVisible && bar.height > 0 && bar.maxY == content.bounds.maxY && webView.frame.maxY == bar.minY,
+              "the find bar shows at the top, the page below it", "bar \(bar), page \(webView.frame)")
+        content.find(.hideFindInterface)
+        check(!content.isFindBarVisible && webView.frame == content.bounds, "hiding it gives the page its room back", "\(webView.frame)")
+
+        print("13. ⇧⌘B opens a saved chat in the browser, not a temporary or new one")
+        let savedChat = URL(string: "https://chatgpt.com/c/6ad6156c-7574")!
+        for (link, expected) in [("https://chatgpt.com/c/6ad6156c-7574", savedChat), ("https://chatgpt.com/c/6ad6156c-7574?model=x#end", savedChat),
+                                 ("https://chatgpt.com/c/6ad6156c-7574?temporary-chat=true", nil),
+                                 ("https://chatgpt.com/c/local-chatgpt%3A35823b96", nil), ("https://chatgpt.com/", nil),
+                                 ("https://chatgpt.com/?temporary-chat=true", nil), ("https://chatgpt.com/library", nil),
+                                 ("https://example.com/c/1", nil), ("http://chatgpt.com/c/1", nil)] as [(String, URL?)] {
+            let url = QuickChatController.browserURL(for: URL(string: link)!)
+            check(url == expected, "\(link) → \(expected?.absoluteString ?? "nothing")", url?.absoluteString ?? "nothing")
+        }
+
+        print("14. no shortcut can take the panel's or chatgpt.com's keys")
+        for (combo, carbon, key) in [("⌘V", cmdKey, kVK_ANSI_V), ("⌘K", cmdKey, kVK_ANSI_K), ("⇧⌘F", cmdKey | shiftKey, kVK_ANSI_F),
+                                     ("⌘W", cmdKey, kVK_ANSI_W), ("⌘↩", cmdKey, kVK_Return)] {
+            check(Shortcut.reservedUse(of: Shortcut(keyCode: UInt32(key), carbonModifiers: UInt32(carbon))) != nil, "\(combo) is taken")
+        }
+        let dvorakPaste = Shortcut(keyCode: UInt32(kVK_ANSI_Period), carbonModifiers: UInt32(cmdKey), keyLabel: "V")
+        check(Shortcut.reservedUse(of: dvorakPaste) == "Paste", "⌘V on another layout (Dvorak's V key) is taken too")
+        for shortcut in [Shortcut.optionSpace, .optionShiftSpace, .optionShiftV, .commandO, .commandF] {
+            check(Shortcut.reservedUse(of: shortcut) == nil, "\(shortcut.displayString) (a default) is free")
+        }
+
+        print("15. on chatgpt.com: chats are Chat and a temporary one is marked")
+        spin(until: { !webView.isLoading && evaluate("document.readyState") as? String == "complete" }, seconds: 20)
+        check(evaluate(#"document.documentElement.hasAttribute("data-quick-chat-temporary")"#) as? Bool == true,
+              "the temporary chat is marked (dashed message box)")
+        check((evaluate("document.cookie") as? String)?.contains("codex_composer_mode=chat") == true, "Chat mode, not Work")
+
+        print("16. an answer that finishes while the panel is hidden puts a dot on the menu-bar icon")
+        let observer = NotificationCenter.default.addObserver(forName: QuickChatController.unseenAnswerDidChange, object: chat,
+                                                              queue: .main) { _ in MainActor.assumeIsolated { unseenPosts += 1 } }
+        defer { NotificationCenter.default.removeObserver(observer) }
+        // A stand-in for chatgpt.com's Stop button (its send button while answering).
+        _ = evaluate(#"""
+            const form = document.createElement("form");
+            form.id = "quick-chat-self-test";
+            form.innerHTML = '<button type="button" class="bg-composer-primary" style="width: 20px; height: 20px">Stop</button>';
+            document.body.append(form);
+            """#)
+        check(evaluate(QuickChatController.answeringScript) as? Bool == true, "the stand-in reads as answering")
+        chat.hide(restoreFocus: false)
+        spin(until: { false }, seconds: 1.5)
+        check(!chat.hasUnseenAnswer, "hidden while answering: no dot yet")
+        _ = evaluate(#"document.getElementById("quick-chat-self-test").remove()"#)
+        spin(until: { chat.hasUnseenAnswer }, seconds: 3)
+        check(chat.hasUnseenAnswer && unseenPosts == 1, "the answer is done: a dot", "posts \(unseenPosts)")
+        chat.show()
+        check(!chat.hasUnseenAnswer && unseenPosts == 2, "shown again: no dot", "posts \(unseenPosts)")
+        chat.hide(restoreFocus: false)
+        spin(until: { false }, seconds: 1.5)
+        check(!chat.hasUnseenAnswer, "hidden with nothing answering: no dot")
 
         print(failures == 0 ? "panel self-test: ALL PASSED" : "panel self-test: \(failures) FAILED")
         return failures == 0

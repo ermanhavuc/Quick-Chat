@@ -12,6 +12,8 @@ struct Shortcut: Codable, Equatable {
     static let optionSpace = Shortcut(keyCode: UInt32(kVK_Space), carbonModifiers: UInt32(optionKey))
     /// Default global shortcut for Ask About Selection.
     static let optionShiftSpace = Shortcut(keyCode: UInt32(kVK_Space), carbonModifiers: UInt32(optionKey | shiftKey))
+    /// Default global shortcut for Ask About Clipboard.
+    static let optionShiftV = Shortcut(keyCode: UInt32(kVK_ANSI_V), carbonModifiers: UInt32(optionKey | shiftKey), keyLabel: "V")
     /// Default local shortcut for resetting the Quick Chat panel's size.
     static let commandO = Shortcut(keyCode: UInt32(kVK_ANSI_O), carbonModifiers: UInt32(cmdKey), keyLabel: "O")
     /// Default local shortcut for maximizing / restoring the Quick Chat panel.
@@ -68,6 +70,41 @@ struct Shortcut: Codable, Equatable {
         guard let key, let code = Self.keyCodes[key] else { return nil }
         self.init(keyCode: UInt32(code), carbonModifiers: carbon, keyLabel: key.uppercased())
     }
+
+    /// What `shortcut` already does in Quick Chat's panel (`QuickChatPanel.performKeyEquivalent`
+    /// and its Edit menu) or on chatgpt.com ("Paste"), so none of Quick Chat's shortcuts may
+    /// take it: a global one would take it from every app, a local one from the panel. Matches
+    /// the key's position (US layout) or, as the panel and menus do, the character it typed
+    /// when recorded (`keyLabel`), so other layouts (Dvorak's ⌘V) are covered too.
+    static func reservedUse(of shortcut: Shortcut) -> String? {
+        let character = shortcut.keyLabel?.lowercased()
+        return reserved.first { use in
+            use.modifiers == shortcut.carbonModifiers
+                && (use.keyCode == shortcut.keyCode || (use.character != nil && use.character == character))
+        }?.use
+    }
+
+    private static let reserved: [(keyCode: UInt32, character: String?, modifiers: UInt32, use: String)] = {
+        let cmd = UInt32(cmdKey), shift = UInt32(shiftKey), option = UInt32(optionKey)
+        let uses: [(Int, String?, UInt32, String)] = [
+            (kVK_ANSI_W, "w", cmd, "Hide"), (kVK_ANSI_N, "n", cmd, "New Temporary Chat"),
+            (kVK_ANSI_N, "n", cmd | shift, "New Saved Chat"), (kVK_ANSI_Minus, "-", cmd, "Zoom Out"),
+            (kVK_ANSI_Equal, "=", cmd, "Zoom In"), (kVK_ANSI_Equal, "+", cmd | shift, "Zoom In"),
+            (kVK_ANSI_0, "0", cmd, "Actual Size"), (kVK_ANSI_LeftBracket, "[", cmd, "Less Thinking"),
+            (kVK_ANSI_RightBracket, "]", cmd, "More Thinking"), (kVK_ANSI_Backslash, "\\", cmd, "Show or Hide the Top Bar"),
+            (kVK_ANSI_F, "f", cmd | shift, "Find"), (kVK_ANSI_G, "g", cmd, "Find Next"),
+            (kVK_ANSI_G, "g", cmd | shift, "Find Previous"), (kVK_ANSI_B, "b", cmd | shift, "Open Chat in Browser"),
+            (kVK_ANSI_Z, "z", cmd, "Undo"), (kVK_ANSI_Z, "z", cmd | shift, "Redo"), (kVK_ANSI_X, "x", cmd, "Cut"),
+            (kVK_ANSI_C, "c", cmd, "Copy"), (kVK_ANSI_V, "v", cmd, "Paste"),
+            (kVK_ANSI_V, "v", cmd | option | shift, "Paste and Match Style"), (kVK_ANSI_A, "a", cmd, "Select All"),
+            (kVK_ANSI_Q, "q", cmd, "Quit"),
+            // chatgpt.com's own (its Keyboard shortcuts dialog, ⌘/).
+            (kVK_ANSI_K, "k", cmd, "chatgpt.com's Search Chats"), (kVK_ANSI_O, "o", cmd | shift, "chatgpt.com's New Chat"),
+            (kVK_ANSI_U, "u", cmd, "chatgpt.com's Attach Files"), (kVK_Delete, nil, cmd | shift, "chatgpt.com's Delete Chat"),
+            (kVK_ANSI_Slash, "/", cmd, "chatgpt.com's Keyboard Shortcuts"), (kVK_Return, nil, cmd, "chatgpt.com's Send"),
+        ]
+        return uses.map { (UInt32($0.0), $0.1, $0.2, $0.3) }
+    }()
 
     /// Same key and modifiers (the display label doesn't matter).
     static func == (lhs: Shortcut, rhs: Shortcut) -> Bool {
@@ -127,6 +164,7 @@ struct Shortcut: Codable, Equatable {
 
     private static let defaultsKey = "miniChat.shortcut" // pre-rename key; persisted, keep
     private static let askDefaultsKey = "quickChat.askShortcut"
+    private static let askClipboardDefaultsKey = "quickChat.askClipboardShortcut"
     /// Local (panel-focused) shortcut for Reset Size & Position.
     private static let resetSizeDefaultsKey = "quickChat.resetSizeShortcut"
     /// Local (panel-focused) shortcut for Maximize / Restore Size.
@@ -139,6 +177,10 @@ struct Shortcut: Codable, Equatable {
     /// The global Ask About Selection shortcut.
     static func loadAsk() -> Shortcut { load(key: askDefaultsKey, fallback: .optionShiftSpace) }
     func saveAsAsk() { save(key: Self.askDefaultsKey) }
+
+    /// The global Ask About Clipboard shortcut.
+    static func loadAskClipboard() -> Shortcut { load(key: askClipboardDefaultsKey, fallback: .optionShiftV) }
+    func saveAsAskClipboard() { save(key: Self.askClipboardDefaultsKey) }
 
     /// The Reset Size & Position shortcut (works only while the Quick Chat panel is focused).
     static func loadResetSize() -> Shortcut { load(key: resetSizeDefaultsKey, fallback: .commandO) }

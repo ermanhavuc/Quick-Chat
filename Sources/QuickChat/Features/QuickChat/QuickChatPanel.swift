@@ -22,11 +22,15 @@ final class QuickChatController: NSObject {
     private let log = Log.make("QuickChat")
     private var panel: QuickChatPanel?
     private var webView: QuickChatWebView?
+    /// The panel's content: the web view, its find bar and toasts.
+    private var content: QuickChatContentView?
     /// Open popup windows (see `makePopup`); each one leaves this list when it closes.
     private var popups: [NSWindow] = []
     private var previousApp: NSRunningApplication?
-    /// Where each in-flight download is being written, for "reveal in Finder" when it finishes.
+    /// Where each in-flight download is being written, for "show in Finder" when it finishes.
     private var downloadDestinations: [ObjectIdentifier: URL] = [:]
+    /// Downloads that finished while the panel was hidden, announced when it's shown again.
+    private var unseenDownloads: [URL] = []
 
     var isVisible: Bool { panel?.isVisible == true }
 
@@ -59,12 +63,24 @@ final class QuickChatController: NSObject {
         }
     }
 
-    /// Zooms one level out (`step` < 0) or in (> 0), or back to the default (0).
+    /// Zooms one level out (`step` < 0) or in (> 0), or back to the default (0), and says so.
     func zoom(_ step: Int) {
-        if step == 0 { pageZoom = Self.defaultPageZoom; return }
-        let next = step > 0 ? Self.pageZoomLevels.first { $0 > pageZoom + 0.001 }
-                            : Self.pageZoomLevels.last { $0 < pageZoom - 0.001 }
-        if let next { pageZoom = next } else { NSSound.beep() }
+        let next = step == 0 ? Self.defaultPageZoom
+            : step > 0 ? Self.pageZoomLevels.first { $0 > pageZoom + 0.001 }
+            : Self.pageZoomLevels.last { $0 < pageZoom - 0.001 }
+        let symbol = step < 0 ? "minus.magnifyingglass" : step > 0 ? "plus.magnifyingglass" : "magnifyingglass"
+        let percent = "Zoom \(Int((pageZoom * 100).rounded()))%"
+        guard let next else {
+            NSSound.beep()
+            return showToast("\(percent), the \(step > 0 ? "largest" : "smallest")", symbol: symbol)
+        }
+        pageZoom = next
+        showToast("Zoom \(Int((pageZoom * 100).rounded()))%", symbol: symbol)
+    }
+
+    /// A short message over the top of the panel (see `QuickChatContentView.showToast`).
+    func showToast(_ text: String, symbol: String? = nil, action: ToastAction? = nil) {
+        content?.showToast(text, symbol: symbol, action: action)
     }
 
     static let hidesTopBarDefaultsKey = "quickChat.hidesTopBar"
@@ -93,8 +109,7 @@ final class QuickChatController: NSObject {
     }
 
     /// ⌘N / ⇧⌘N: a new temporary chat (chatgpt.com's `?temporary-chat=true`), or a new saved one.
-    /// Like chatgpt.com's own New chat, a saved one stays in the current Chat or Work mode; a
-    /// temporary chat is always Chat.
+    /// Both are Chat, never Work (`chatOnlyScript`).
     func newChat(temporary: Bool) {
         let path = temporary ? Self.temporaryChatPath : "/"
         webView?.callAsyncJavaScript(Self.newChatScript, arguments: ["path": path],
@@ -106,19 +121,40 @@ final class QuickChatController: NSObject {
     }
 
     /// Goes to `path` through chatgpt.com's own router (pushState plus the popstate event that
-    /// Back/Forward fire), which is quicker than reloading the app. Already there: does nothing
-    /// if that chat has no messages yet, else reloads so the chat starts fresh. Loads
-    /// chatgpt.com when on another site (sign-in).
+    /// Back/Forward fire), which is quicker than reloading the app, then focuses the new chat's
+    /// message box once it's there (throwing after 5 s, so `newChat` reloads instead). Already
+    /// there: does nothing if that chat has no messages yet, else reloads so the chat starts
+    /// fresh. Loads chatgpt.com when on another site (sign-in).
     private static let newChatScript = """
+        \(messageBoxScript)
         if (location.host !== "chatgpt.com") { location.href = "https://chatgpt.com" + path; return; }
         if (location.pathname + location.search === path) {
-          if (\(hasMessagesScript)) location.reload(); else \(focusComposerScript)
+          if (\(hasMessagesScript)) location.reload(); else messageBox()?.focus();
           return;
         }
+        const previous = messageBox();
         history.pushState(null, "", path);
         dispatchEvent(new PopStateEvent("popstate", {state: null}));
-        await new Promise(r => setTimeout(r, 300));
-        \(focusComposerScript)
+        const box = await newMessageBox(previous);
+        if (!box) throw new Error("no message box in the new chat");
+        box.focus();
+        """
+
+    /// `messageBox()`: the rendered message box. `newMessageBox(previous)`: waits (up to 5 s) for
+    /// a new chat's message box: the previous one stays in the page, hidden, and may still show
+    /// for a moment.
+    private static let messageBoxScript = """
+        const sleep = ms => new Promise(r => setTimeout(r, ms));
+        const messageBox = () => [...document.querySelectorAll('#prompt-textarea, form [contenteditable="true"]')]
+          .find(e => e.getClientRects().length);
+        const newMessageBox = async previous => {
+          for (let i = 0; i < 100; i++) {
+            const box = messageBox();
+            if (box && box !== previous) return box;
+            await sleep(50);
+          }
+          return null;
+        };
         """
 
     /// Whether the visible chat has messages (each turn has a data-turn-key); the previous
@@ -164,12 +200,9 @@ final class QuickChatController: NSObject {
     /// drop the text: it returns "reload" if that's needed, and `insertQuestion` reloads and
     /// runs it again. Then pastes `text` into the message box as if with ⌘V (so a long text
     /// becomes an attachment, as chatgpt.com does with pastes), followed by an empty line for
-    /// the question. Waits (up to 5 s) for the new chat's message box: the previous one stays in
-    /// the page, hidden, and may still show for a moment; it's never written to.
+    /// the question. The previous chat's message box is never written to (`newMessageBox`).
     private static let askScript = """
-        const sleep = ms => new Promise(r => setTimeout(r, ms));
-        const messageBox = () => [...document.querySelectorAll('#prompt-textarea, form [contenteditable="true"]')]
-          .find(e => e.getClientRects().length);
+        \(messageBoxScript)
         if (location.hostname !== "chatgpt.com") throw new Error("not on chatgpt.com");
         const here = location.pathname + location.search === path;
         if (here && \(hasMessagesScript)) return "reload";
@@ -178,9 +211,8 @@ final class QuickChatController: NSObject {
           history.pushState(null, "", path);
           dispatchEvent(new PopStateEvent("popstate", {state: null}));
         }
-        let box;
-        for (let i = 0; i < 100 && !((box = messageBox()) && box !== previous); i++) await sleep(50);
-        if (!box || box === previous) throw new Error("no message box in the new chat");
+        const box = await newMessageBox(previous);
+        if (!box) throw new Error("no message box in the new chat");
         box.focus();
         const end = document.createRange();
         end.selectNodeContents(box);
@@ -201,7 +233,8 @@ final class QuickChatController: NSObject {
     private var isSteppingEffort = false
 
     /// Moves chatgpt.com's thinking effort (Instant, Medium, High…) one level down (`step` < 0)
-    /// or up (> 0). Beeps when there's no effort control or it's already at that end.
+    /// or up (> 0) and shows the new level. Beeps when there's no effort control or it's already
+    /// at that end.
     func stepEffort(_ step: Int) {
         guard let webView, !isSteppingEffort else { return }
         isSteppingEffort = true
@@ -210,25 +243,34 @@ final class QuickChatController: NSObject {
             guard let self else { return }
             self.isSteppingEffort = false
             switch result {
-            case .success(let level as String):
-                self.log.info("Thinking effort: \(level, privacy: .public)")
-            case .success:
+            case .success(let value as [String: Any]):
+                var level = (value["level"] as? String ?? "").trimmingCharacters(in: .whitespaces)
+                if level.hasSuffix(".") { level.removeLast() }
+                if value["changed"] as? Bool == true {
+                    self.log.info("Thinking effort: \(level, privacy: .public)")
+                    self.showToast("Thinking: \(level)", symbol: "brain")
+                } else {
+                    NSSound.beep()
+                    self.showToast("Thinking: \(level), the \(step > 0 ? "highest" : "lowest")", symbol: "brain")
+                }
+            case .success, .failure:
+                if case .failure(let error) = result {
+                    // A thrown Error's message is in the userInfo; the description just says "exception".
+                    let message = (error as NSError).userInfo["WKJavaScriptExceptionMessage"] as? String
+                    self.log.error("Thinking effort: \(message ?? error.localizedDescription, privacy: .public)")
+                }
                 NSSound.beep()
-            case .failure(let error):
-                // A thrown Error's message is in the userInfo; the description just says "exception".
-                let message = (error as NSError).userInfo["WKJavaScriptExceptionMessage"] as? String
-                self.log.error("Thinking effort: \(message ?? error.localizedDescription, privacy: .public)")
-                NSSound.beep()
+                self.showToast("No thinking effort to change here", symbol: "brain")
             }
         }
     }
 
     /// The effort slider sits in the composer's model picker menu ("Power"; Left/Right arrow keys
     /// adjust it, as the menu item's aria-keyshortcuts says). Opens the menu if needed, steps the
-    /// slider, closes the menu again and puts focus back in the composer. Returns the new level
-    /// ("High, 3 of 5."), or null if it didn't change. Only rendered elements count: after a new
-    /// chat the page keeps the previous chat's composer around, hidden, ahead of the new one.
-    /// Depends on chatgpt.com's markup.
+    /// slider, closes the menu again and puts focus back in the composer. Returns the level
+    /// after the step ("High, 3 of 5.") and whether it changed. Only rendered elements count:
+    /// after a new chat the page keeps the previous chat's composer around, hidden, ahead of the
+    /// new one. Depends on chatgpt.com's markup.
     private static let stepEffortScript = """
         const sleep = ms => new Promise(r => setTimeout(r, ms));
         const shown = selector => [...document.querySelectorAll(selector)].filter(e => e.getClientRects().length);
@@ -260,7 +302,7 @@ final class QuickChatController: NSObject {
           await sleep(50);
           \(focusComposerScript)
         }
-        return after !== before ? after : null;
+        return {level: after ?? "", changed: after !== before};
         """
 
     /// Hides the panel whenever it's visible (focused or not), otherwise shows it. Focus goes
@@ -281,6 +323,12 @@ final class QuickChatController: NSObject {
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(webView)
         focusComposer()
+        stopWatchingAnswer()
+        hasUnseenAnswer = false
+        if !unseenDownloads.isEmpty {
+            announceDownloads(unseenDownloads)
+            unseenDownloads = []
+        }
     }
 
     /// `restoreFocus`: give focus back to the app that was frontmost before showing.
@@ -288,6 +336,7 @@ final class QuickChatController: NSObject {
         guard let panel, panel.isVisible else { return }
         panel.orderOut(nil)
         if restoreFocus { previousApp?.activate() }
+        watchAnswer()
     }
 
     /// Closes the panel and releases the web view (the sign-in session stays in the data store).
@@ -295,13 +344,111 @@ final class QuickChatController: NSObject {
         for popup in popups { popup.close() }
         panel?.orderOut(nil)
         webView?.stopLoading()
+        content?.finder.client = nil
         panel?.contentView = nil
         panel = nil
         webView = nil
+        content = nil
+        pendingQuestion = nil
+        stopWatchingAnswer()
+        hasUnseenAnswer = false
+    }
+
+    // MARK: Answer ready
+
+    /// Posted when `hasUnseenAnswer` changes (the menu-bar icon shows a dot meanwhile).
+    static let unseenAnswerDidChange = Notification.Name("QuickChatUnseenAnswerDidChange")
+
+    /// An answer finished while the panel was hidden; cleared when it's shown again.
+    private(set) var hasUnseenAnswer = false {
+        didSet {
+            guard hasUnseenAnswer != oldValue else { return }
+            NotificationCenter.default.post(name: Self.unseenAnswerDidChange, object: self)
+        }
+    }
+
+    private var answerTimer: Timer?
+
+    /// After hiding: if chatgpt.com is still answering, checks once a second until it's done
+    /// (the page keeps answering while hidden), then sets `hasUnseenAnswer`.
+    private func watchAnswer() {
+        stopWatchingAnswer()
+        webView?.evaluateJavaScript(Self.answeringScript) { [weak self] answering, _ in
+            MainActor.assumeIsolated {
+                guard let self, answering as? Bool == true, !self.isVisible, self.answerTimer == nil else { return }
+                self.answerTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.checkAnswer() }
+                }
+            }
+        }
+    }
+
+    private func checkAnswer() {
+        guard let webView, !isVisible else { return stopWatchingAnswer() }
+        webView.evaluateJavaScript(Self.answeringScript) { [weak self] answering, _ in
+            MainActor.assumeIsolated {
+                // A page that's loading or gone answers nothing: keep checking.
+                guard let self, answering as? Bool == false, self.answerTimer != nil, !self.isVisible else { return }
+                self.stopWatchingAnswer()
+                self.hasUnseenAnswer = true
+                self.log.info("An answer finished while the panel was hidden")
+            }
+        }
+    }
+
+    private func stopWatchingAnswer() {
+        answerTimer?.invalidate()
+        answerTimer = nil
+    }
+
+    /// Whether chatgpt.com is answering: the message box's send button has become Stop (a
+    /// plain button rather than the form's submit button; or labeled Stop, in English).
+    static let answeringScript = #"""
+        [...document.querySelectorAll('form button[class~="bg-composer-primary"][type="button"], form button[aria-label="Stop"]')]
+          .some(b => b.getClientRects().length)
+        """#
+
+    // MARK: Find, browser
+
+    /// ⇧⌘F / ⌘G / ⇧⌘G: the find bar (AppKit's, as in Safari) over the page.
+    func find(_ action: NSTextFinder.Action) {
+        content?.find(action)
+    }
+
+    /// The open chat on chatgpt.com, for the browser: only a saved chat with messages. A
+    /// temporary chat can't be opened elsewhere, and a new chat has nothing to open.
+    var chatURLForBrowser: URL? { webView?.url.flatMap(Self.browserURL(for:)) }
+
+    static func browserURL(for url: URL) -> URL? {
+        guard url.scheme == "https", url.host?.lowercased() == "chatgpt.com", url.path.hasPrefix("/c/"),
+              !url.path.hasPrefix("/c/local-"), !isTemporary(url),
+              var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
+        components.query = nil
+        components.fragment = nil
+        return components.url
+    }
+
+    /// chatgpt.com keeps `?temporary-chat=true` on a temporary chat, also once it has messages.
+    static func isTemporary(_ url: URL) -> Bool {
+        URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
+            .contains { $0.name == "temporary-chat" && $0.value == "true" } == true
+    }
+
+    /// ⇧⌘B: opens the chat in the default browser (`chatURLForBrowser`) and hides the panel.
+    func openChatInBrowser() {
+        guard let url = chatURLForBrowser else {
+            NSSound.beep()
+            let temporary = webView?.url.map(Self.isTemporary) == true
+            return showToast(temporary ? "A temporary chat can't open in the browser" : "No saved chat to open yet",
+                             symbol: "safari")
+        }
+        NSWorkspace.shared.open(url)
+        hide(restoreFocus: false)
     }
 
     /// Signs out by clearing the panel's website data (cookies, storage).
     func signOut() {
+        pendingQuestion = nil
         let store = WKWebsiteDataStore.default()
         store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast) { [weak self] in
             MainActor.assumeIsolated {
@@ -320,11 +467,15 @@ final class QuickChatController: NSObject {
         panel.onEffort = { [weak self] in self?.stepEffort($0) }
         panel.onNewChat = { [weak self] in self?.newChat(temporary: $0) }
         panel.onToggleTopBar = { [weak self] in self?.toggleTopBar() }
+        panel.onFind = { [weak self] in self?.find($0) }
+        panel.onOpenInBrowser = { [weak self] in self?.openChatInBrowser() }
         panel.resetSizeShortcut = resetSizeShortcut
         panel.maximizeShortcut = maximizeShortcut
 
         let webView = makeWebView()
-        panel.setContent(webView)
+        let content = QuickChatContentView(webView: webView)
+        panel.setContent(content)
+        self.content = content
 
         if !panel.setFrameUsingName(QuickChatPanel.autosaveName) {
             // First open: the bottom center of the screen with the mouse.
@@ -536,9 +687,23 @@ final class QuickChatController: NSObject {
         }
         """
 
+    /// A temporary chat (`chatOnlyScript` marks the root `data-quick-chat-temporary`) shows it in
+    /// the message box, also while the top bar with chatgpt.com's own Temporary button is
+    /// hidden: a dashed outline, like the dashed bubbles of your messages there, and the
+    /// placeholder reads "Ask ChatGPT · temporary chat". A saved chat's box stays as it is.
+    private static let temporaryChatCSS = """
+        [data-quick-chat-temporary] form [class*="ComposerLayoutRoot-"] {
+          outline: 1px dashed color-mix(in srgb, currentColor 40%, transparent);
+          outline-offset: -1px;
+        }
+        [data-quick-chat-temporary] form .ProseMirror p.placeholder[data-placeholder]::before {
+          content: attr(data-placeholder) " · temporary chat";
+        }
+        """
+
     /// The page's touch-ups, with `glassCSS` where the panel is Liquid Glass.
     private static var pageCSS: String {
-        let css = macColorsCSS + pageLayoutCSS + chatOnlyCSS + hideTopBarCSS
+        let css = macColorsCSS + pageLayoutCSS + chatOnlyCSS + temporaryChatCSS + hideTopBarCSS
         if #available(macOS 26, *) { return css + glassCSS }
         return css
     }
@@ -562,11 +727,18 @@ final class QuickChatController: NSObject {
     private static let openInBrowserMessage = "quickChatOpenInBrowser"
 
     /// Keeps the panel to chats (`isChatPath`): a link to another chatgpt.com page, or the page
-    /// moving there itself (it routes in place, without a page load the app would see), opens it
-    /// in the default browser instead, and the panel goes back. ⇧⌘S (chatgpt.com's sidebar key)
-    /// does nothing, as the sidebar is gone (`chatOnlyCSS`).
+    /// moving there itself (it routes in place with pushState or replaceState, without a page
+    /// load the app would see), opens it in the default browser instead, and the panel goes
+    /// back; Back/Forward skip such pages. ⇧⌘S (chatgpt.com's sidebar key) does nothing, as the
+    /// sidebar is gone (`chatOnlyCSS`). Chats are always Chat, never Work: the Chat/Work switch is
+    /// gone too, so its cookie is set to Chat before the page reads it. Marks the root
+    /// `data-quick-chat-temporary` in a temporary chat (`temporaryChatCSS`).
     private static let chatOnlyScript = """
         if (location.hostname === "chatgpt.com") {
+          document.cookie = "codex_composer_mode=chat; path=/; max-age=31536000; secure; samesite=lax";
+          const markTemporary = () => document.documentElement.toggleAttribute("data-quick-chat-temporary",
+            new URLSearchParams(location.search).get("temporary-chat") === "true");
+          markTemporary();
           const isChatPath = path => path === "/" || path.startsWith("/c/") || path.startsWith("/auth/");
           const outside = href => {
             const url = new URL(href, location.href);
@@ -581,12 +753,31 @@ final class QuickChatController: NSObject {
             event.stopImmediatePropagation();
             openInBrowser(url);
           }, true);
-          const pushState = history.pushState;
-          history.pushState = function (state, title, href) {
-            pushState.apply(this, arguments);
-            const url = href != null && outside(href);
-            if (url) { openInBrowser(url); history.back(); }
-          };
+          for (const name of ["pushState", "replaceState"]) {
+            const move = history[name];
+            history[name] = function (state, title, href) {
+              const url = href != null && outside(href);
+              const [fromState, from] = [history.state, location.href];
+              move.apply(this, arguments);
+              if (url) {
+                openInBrowser(url);
+                if (name === "pushState") {
+                  history.back();
+                } else {
+                  move.call(this, fromState, "", from);
+                  dispatchEvent(new PopStateEvent("popstate", {state: fromState}));
+                }
+              }
+              markTemporary();
+            };
+          }
+          addEventListener("popstate", event => {
+            if (outside(location.href)) {
+              event.stopImmediatePropagation();
+              history.back();
+            }
+            markTemporary();
+          }, true);
           addEventListener("keydown", event => {
             if (event.metaKey && event.shiftKey && !event.altKey && !event.ctrlKey && event.key.toLowerCase() === "s") {
               event.preventDefault();
@@ -684,12 +875,14 @@ extension QuickChatController: NSWindowDelegate {
 
 extension QuickChatController: WKScriptMessageHandler {
     /// `dragScript`: a press on the panel's top bar, away from its buttons. `chatOnlyScript`: a
-    /// chatgpt.com page that isn't a chat, for the default browser (nothing else is opened).
+    /// chatgpt.com page that isn't a chat, for the default browser (nothing else is opened),
+    /// from the panel or a popup, which share these scripts.
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard message.webView === webView else { return }
+        let fromPanel = message.webView === webView
+        guard fromPanel || popups.contains(where: { $0.contentView === message.webView }) else { return }
         switch message.name {
         case Self.dragMessage:
-            panel?.dragFromPage()
+            if fromPanel { panel?.dragFromPage() }
         case Self.openInBrowserMessage:
             guard let href = message.body as? String, let url = URL(string: href), url.scheme == "https",
                   url.host?.lowercased() == "chatgpt.com", !Self.isChatPath(url.path) else { return }
@@ -811,15 +1004,24 @@ extension QuickChatController: WKUIDelegate, WKNavigationDelegate, WKDownloadDel
         completionHandler(destination)
     }
 
+    /// Says so in the panel (now, or when it's shown again) rather than bringing Finder forward;
+    /// clicking the message shows the file in Finder.
     func downloadDidFinish(_ download: WKDownload) {
         guard let destination = downloadDestinations.removeValue(forKey: ObjectIdentifier(download)) else { return }
-        NSWorkspace.shared.activateFileViewerSelecting([destination])
+        if isVisible { announceDownloads([destination]) } else { unseenDownloads.append(destination) }
     }
 
     func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
         downloadDestinations.removeValue(forKey: ObjectIdentifier(download))
         log.error("Download failed: \(error.localizedDescription, privacy: .public)")
         NSSound.beep()
+        showToast("Download failed", symbol: "exclamationmark.circle")
+    }
+
+    private func announceDownloads(_ files: [URL]) {
+        let what = files.count == 1 ? "“\(files[0].lastPathComponent)”" : "\(files.count) files"
+        showToast("Saved \(what) to Downloads", symbol: "arrow.down.circle",
+                  action: ToastAction(title: "Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting(files) })
     }
 }
 
@@ -839,6 +1041,205 @@ final class QuickChatWebView: WKWebView {
             if (isFlipped ? point.y : bounds.maxY - point.y) < firstClickBand { return true }
         }
         return super.acceptsFirstMouse(for: event)
+    }
+
+    /// For the find bar (`NSTextFinderClient`): find only, no Replace.
+    override var isEditable: Bool { false }
+}
+
+// MARK: - Content
+
+/// What the panel holds: chatgpt.com's web view, with AppKit's find bar above it while finding
+/// (the web view is the `NSTextFinder`'s client, as in Safari), and short messages
+/// (`showToast`) over the top of the page.
+final class QuickChatContentView: NSView, @preconcurrency NSTextFinderBarContainer {
+    let webView: QuickChatWebView
+    let finder = NSTextFinder()
+    private var toast: ToastView?
+    private var toastTimer: Timer?
+
+    init(webView: QuickChatWebView) {
+        self.webView = webView
+        super.init(frame: .zero)
+        addSubview(webView)
+        finder.client = webView
+        finder.findBarContainer = self
+        finder.isIncrementalSearchingEnabled = true
+        finder.incrementalSearchingShouldDimContentView = false
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    var findBarView: NSView? {
+        didSet {
+            oldValue?.removeFromSuperview()
+            if let findBarView {
+                findBarView.isHidden = !findBarShown
+                addSubview(findBarView, positioned: .above, relativeTo: webView)
+            }
+            layoutContent()
+        }
+    }
+
+    /// `NSTextFinder` hides the bar through the protocol's setFindBarVisible: (which Swift doesn't
+    /// map this to by itself), but doesn't show it that way: `find(_:)` does.
+    var isFindBarVisible: Bool {
+        @objc(isFindBarVisible) get { findBarShown }
+        @objc(setFindBarVisible:) set {
+            let wasShown = findBarShown
+            findBarShown = newValue
+            findBarView?.isHidden = !newValue
+            layoutContent()
+            if wasShown, !newValue { window?.makeFirstResponder(webView) }
+        }
+    }
+    private var findBarShown = false
+
+    func findBarViewDidChangeHeight() { layoutContent() }
+
+    func find(_ action: NSTextFinder.Action) {
+        finder.performAction(action)
+        if action == .showFindInterface { isFindBarVisible = true }
+    }
+
+    /// The find bar's own controls (Return, the arrows) send their action up from the bar.
+    override func performTextFinderAction(_ sender: Any?) {
+        let tag = (sender as? NSControl)?.tag ?? (sender as? NSMenuItem)?.tag
+        if let tag, let action = NSTextFinder.Action(rawValue: tag) { find(action) }
+    }
+
+    func contentView() -> NSView? { webView }
+
+    override func resizeSubviews(withOldSize oldSize: NSSize) { layoutContent() }
+
+    /// The find bar (at the height `NSTextFinder` gave it) at the top and the web view below it;
+    /// the toast centered near the top.
+    private func layoutContent() {
+        let barHeight = isFindBarVisible ? findBarView?.frame.height ?? 0 : 0
+        if let findBarView {
+            findBarView.frame = NSRect(x: 0, y: bounds.height - findBarView.frame.height,
+                                       width: bounds.width, height: findBarView.frame.height)
+        }
+        webView.frame = NSRect(x: 0, y: 0, width: bounds.width, height: bounds.height - barHeight)
+        if let toast {
+            var size = toast.preferredSize
+            size.width = min(size.width, bounds.width - 32)
+            toast.frame = NSRect(x: ((bounds.width - size.width) / 2).rounded(), y: bounds.height - barHeight - 12 - size.height,
+                                 width: size.width, height: size.height)
+        }
+    }
+
+    /// Shows `text` (with an SF Symbol) over the top of the page for a moment, replacing any
+    /// message still up; with an `action`, longer, ending in its title, and a click on it runs
+    /// the action. VoiceOver reads it out.
+    func showToast(_ text: String, symbol: String?, action: ToastAction?) {
+        toastTimer?.invalidate()
+        toast?.removeFromSuperview()
+        let toast = ToastView(text: text, symbol: symbol, actionTitle: action?.title)
+        if let action { toast.action = { [weak self] in action.run(); self?.hideToast() } }
+        addSubview(toast)
+        self.toast = toast
+        layoutContent()
+        let announcement = [text, action?.title].compactMap { $0 }.joined(separator: ". ")
+        NSAccessibility.post(element: toast, notification: .announcementRequested,
+                             userInfo: [.announcement: announcement, .priority: NSAccessibilityPriorityLevel.high.rawValue])
+        toastTimer = Timer.scheduledTimer(withTimeInterval: action == nil ? 1.5 : 5, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.hideToast() }
+        }
+    }
+
+    private func hideToast() {
+        toastTimer?.invalidate()
+        guard let toast else { return }
+        self.toast = nil
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { return toast.removeFromSuperview() }
+        NSAnimationContext.runAnimationGroup({ $0.duration = 0.3; toast.animator().alphaValue = 0 },
+                                             completionHandler: { MainActor.assumeIsolated { toast.removeFromSuperview() } })
+    }
+
+    var toastText: String? { toast?.text } // for the self-test
+}
+
+/// What a click on a toast does, and the words for it at the toast's end ("Show in Finder").
+struct ToastAction {
+    let title: String
+    let run: () -> Void
+}
+
+/// A capsule with an icon and a line of text (`QuickChatContentView.showToast`): Liquid Glass
+/// on macOS 26 and later, else a blurred material. Clicks go through to the page, unless it
+/// has an action. A long text is shortened in its middle; the action's title never is.
+private final class ToastView: NSView {
+    let text: String
+    var action: (() -> Void)? { didSet { window?.invalidateCursorRects(for: self) } }
+    private let row: NSStackView
+    var preferredSize: NSSize { row.fittingSize }
+
+    init(text: String, symbol: String?, actionTitle: String?) {
+        self.text = text
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: 13, weight: .medium)
+        label.lineBreakMode = .byTruncatingMiddle
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        var views: [NSView] = [label]
+        if let actionTitle {
+            let title = NSTextField(labelWithString: actionTitle)
+            title.font = .systemFont(ofSize: 13, weight: .semibold)
+            title.textColor = .controlAccentColor
+            title.setContentCompressionResistancePriority(.required, for: .horizontal)
+            views.append(title)
+        }
+        if let symbol, let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil) {
+            let icon = NSImageView(image: image)
+            icon.symbolConfiguration = .init(pointSize: 13, weight: .medium)
+            icon.contentTintColor = .secondaryLabelColor
+            views.insert(icon, at: 0)
+        }
+        row = NSStackView(views: views)
+        super.init(frame: .zero)
+        row.spacing = 6
+        row.edgeInsets = NSEdgeInsets(top: 7, left: 14, bottom: 7, right: 14)
+        let background: NSView
+        if #available(macOS 26, *) {
+            let glass = NSGlassEffectView()
+            glass.cornerRadius = 15
+            glass.contentView = row
+            background = glass
+        } else {
+            let blur = NSVisualEffectView()
+            blur.material = .popover
+            blur.state = .active
+            blur.wantsLayer = true
+            blur.layer?.cornerRadius = 15
+            blur.layer?.masksToBounds = true
+            row.translatesAutoresizingMaskIntoConstraints = false
+            blur.addSubview(row)
+            NSLayoutConstraint.activate([
+                row.leadingAnchor.constraint(equalTo: blur.leadingAnchor), row.trailingAnchor.constraint(equalTo: blur.trailingAnchor),
+                row.topAnchor.constraint(equalTo: blur.topAnchor), row.bottomAnchor.constraint(equalTo: blur.bottomAnchor),
+            ])
+            background = blur
+        }
+        background.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(background)
+        NSLayoutConstraint.activate([
+            background.leadingAnchor.constraint(equalTo: leadingAnchor), background.trailingAnchor.constraint(equalTo: trailingAnchor),
+            background.topAnchor.constraint(equalTo: topAnchor), background.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        action != nil && frame.contains(point) ? self : nil
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func mouseDown(with event: NSEvent) { action?() }
+    override func resetCursorRects() {
+        if action != nil { addCursorRect(bounds, cursor: .pointingHand) }
     }
 }
 
@@ -860,6 +1261,10 @@ final class QuickChatPanel: NSPanel {
     var onNewChat: ((Bool) -> Void)?
     /// ⌘\: show or hide chatgpt.com's top bar.
     var onToggleTopBar: (() -> Void)?
+    /// ⇧⌘F / ⌘G / ⇧⌘G: show the find bar, find the next / previous match.
+    var onFind: ((NSTextFinder.Action) -> Void)?
+    /// ⇧⌘B: open the chat in the default browser.
+    var onOpenInBrowser: (() -> Void)?
     /// Local key combo that calls `resetSize()` while the panel is key (default ⌘O).
     var resetSizeShortcut: Shortcut? = .commandO
     /// Local key combo that calls `toggleMaximize()` while the panel is key (default ⌘F).
@@ -904,16 +1309,17 @@ final class QuickChatPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
 
-    /// Puts the web view in the panel. On macOS 26 and later, it sits on a Liquid Glass sheet and
-    /// draws no background of its own, so the page's see-through parts (`glassCSS`) show the glass.
-    func setContent(_ webView: WKWebView) {
-        guard #available(macOS 26, *) else { contentView = webView; return }
+    /// Puts the web view (in its `content`) in the panel. On macOS 26 and later, it sits on a
+    /// Liquid Glass sheet and draws no background of its own, so the page's see-through parts
+    /// (`glassCSS`) show the glass.
+    func setContent(_ content: QuickChatContentView) {
+        guard #available(macOS 26, *) else { contentView = content; return }
         backgroundColor = .clear
         isOpaque = false
-        webView.setValue(false, forKey: "drawsBackground") // no public API for a see-through web view
-        webView.underPageBackgroundColor = .clear
+        content.webView.setValue(false, forKey: "drawsBackground") // no public API for a see-through web view
+        content.webView.underPageBackgroundColor = .clear
         let glass = NSGlassEffectView()
-        glass.contentView = webView
+        glass.contentView = content
         contentView = glass
     }
 
@@ -1018,8 +1424,9 @@ final class QuickChatPanel: NSPanel {
     override func close() { onCancel?() }
 
     /// ⌘W hides, ⌘N / ⇧⌘N start a temporary / saved chat, ⌘− / ⌘= / ⌘0 zoom, ⌘[ / ⌘] change the
-    /// thinking effort and ⌘\ shows or hides the top bar; the local shortcuts are caught here
-    /// too, ahead of the web view (which otherwise claims ⌘ combos).
+    /// thinking effort, ⌘\ shows or hides the top bar, ⇧⌘F / ⌘G / ⇧⌘G find and ⇧⌘B opens the
+    /// chat in the browser; the local shortcuts are caught here too, ahead of the web view
+    /// (which otherwise claims ⌘ combos). `Shortcut.reservedUse` lists these.
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if handleLocalShortcut(event) { return true }
         if event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
@@ -1035,6 +1442,13 @@ final class QuickChatPanel: NSPanel {
         if flags == .command, event.charactersIgnoringModifiers == "\\" {
             onToggleTopBar?()
             return true
+        }
+        switch (event.charactersIgnoringModifiers?.lowercased(), flags) {
+        case ("f", [.command, .shift]): onFind?(.showFindInterface); return true
+        case ("g", .command): onFind?(.nextMatch); return true
+        case ("g", [.command, .shift]): onFind?(.previousMatch); return true
+        case ("b", [.command, .shift]): onOpenInBrowser?(); return true
+        default: break
         }
         // Matched by character, Shift allowed, so layouts with a shifted = or + work too.
         if event.modifierFlags.intersection([.control, .option, .command]) == .command {

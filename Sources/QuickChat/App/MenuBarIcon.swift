@@ -2,8 +2,9 @@ import AppKit
 
 /// The menu-bar glyph: the app icon's chat bubble with its sparkles cut out, as a template image.
 /// The shapes use the app icon's 1024-pt coordinates (scripts/make-icon.swift) so the two stay in step.
+/// `dot`: a dot at the top right, set apart from the bubble by a gap (Quick Chat's answer is ready).
 enum MenuBarIcon {
-    static func make() -> NSImage {
+    static func make(dot: Bool = false) -> NSImage {
         let size = NSSize(width: 18, height: 18)
         let image = NSImage(size: size, flipped: false) { _ in
             // The bubble with its tail spans x 250…774, y 262…730 in icon space.
@@ -33,10 +34,17 @@ enum MenuBarIcon {
             sparkles.transform(using: transform as AffineTransform)
             NSGraphicsContext.current?.compositingOperation = .destinationOut
             sparkles.fill()
+
+            if dot {
+                let center = NSPoint(x: size.width - 3.5, y: size.height - 3.5)
+                NSBezierPath(ovalIn: NSRect(x: center.x - 5, y: center.y - 5, width: 10, height: 10)).fill()
+                NSGraphicsContext.current?.compositingOperation = .sourceOver
+                NSBezierPath(ovalIn: NSRect(x: center.x - 3.5, y: center.y - 3.5, width: 7, height: 7)).fill()
+            }
             return true
         }
         image.isTemplate = true
-        image.accessibilityDescription = "Quick Chat"
+        image.accessibilityDescription = dot ? "Quick Chat, answer ready" : "Quick Chat"
         return image
     }
 
