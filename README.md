@@ -68,6 +68,8 @@ chatgpt.com has built-in keyboard shortcuts, and they all reach the panel. Toget
 | ⇧⌘⌫ | Delete chat |
 | ⌘/ | Show all shortcuts (and change them) |
 
+When chatgpt.com briefly turns down loading your chat list ("Too many requests"), ⌘K keeps showing your recent chats while the panel asks again (for up to about 40 seconds, while ⌘K stays open), instead of the titles vanishing until the page reloads.
+
 These come from chatgpt.com's own **Keyboard shortcuts** dialog (⌘/), as of October 2026. Quick Chat only reserves Esc and ⌘W (hide the panel), ⌘N and ⇧⌘N (new chat, new temporary chat), ⌘O (move the panel back to the bottom center), ⌘−, ⌘=, ⌘0 (zoom), ⌘[, ⌘] (thinking effort), ⇧⌘F, ⌘G, ⇧⌘G (find) and ⇧⌘B (open in browser), and turns off ⇧⌘S, as there's no sidebar. **Change Shortcut…** won't take any of these fixed keys, the editing keys (⌘C, ⌘V and so on) or chatgpt.com's own shortcuts above.
 
 ### Disable Show Mini Shortcut

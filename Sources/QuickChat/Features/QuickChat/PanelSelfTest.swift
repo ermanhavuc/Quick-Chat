@@ -139,7 +139,7 @@ enum PanelSelfTest {
 
         print("8. a first click on chatgpt.com's top bar reaches the page")
         let scripts = webView.configuration.userContentController.userScripts
-        check(scripts.count == 5, "the page scripts are in place", "\(scripts.count) scripts")
+        check(scripts.count == 6, "the page scripts are in place", "\(scripts.count) scripts")
         func firstClick(_ fromTop: CGFloat) -> Bool {
             let event = NSEvent.mouseEvent(with: .leftMouseDown, location: NSPoint(x: 80, y: frameView.bounds.maxY - fromTop),
                                            modifierFlags: [], timestamp: 0, windowNumber: panel.windowNumber, context: nil,
@@ -407,6 +407,46 @@ enum PanelSelfTest {
         let grown = evaluate(fade) as? String
         check(grown == "150px true", "the message box grows: the fade's bottom follows it", grown ?? "nothing")
         _ = evaluate(#"document.getElementById("quick-chat-self-test-thread").remove(); true"#)
+
+        print("20. ⌘K's chat list: a request chatgpt.com turns down is made again")
+        // A stand-in for chatgpt.com's answers, under the page's scripts (no request leaves):
+        // "Too many requests" for the chat list once, then the list; always for other addresses,
+        // also the same path on another site.
+        let userContent = webView.configuration.userContentController
+        let pageScripts = userContent.userScripts.map { $0 }
+        userContent.removeAllUserScripts()
+        userContent.addUserScript(WKUserScript(source: #"""
+            const realFetch = window.fetch;
+            window.quickChatSelfTestCalls = {list: 0, other: 0, otherSite: 0};
+            window.fetch = function (input, init) {
+              const url = new URL(input instanceof Request ? input.url : String(input), location.href);
+              if (!url.search.includes("quick-chat-self-test")) return realFetch.apply(this, arguments);
+              const kind = url.origin !== location.origin ? "otherSite" : url.pathname === "/backend-api/conversations" ? "list" : "other";
+              const calls = ++quickChatSelfTestCalls[kind];
+              return Promise.resolve(new Response("{}", {status: kind === "list" && calls > 1 ? 200 : 429}));
+            };
+            """#, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        for script in pageScripts { userContent.addUserScript(script) }
+        webView.reload()
+        spin(until: { content.isLoading }, seconds: 5)
+        spin(until: { !content.isLoading }, seconds: 12)
+        var retried: String?
+        webView.callAsyncJavaScript(#"""
+            const list = await fetch("/backend-api/conversations?quick-chat-self-test=1");
+            const other = await fetch("/backend-api/me?quick-chat-self-test=1");
+            const otherSite = await fetch("https://example.com/backend-api/conversations?quick-chat-self-test=1");
+            // A request whose own signal is aborted but overridden: still asked for again.
+            quickChatSelfTestCalls.list = 0;
+            const aborted = AbortSignal.abort();
+            const overridden = await fetch(new Request("/backend-api/conversations?quick-chat-self-test=2", {signal: aborted}), {signal: null});
+            const calls = quickChatSelfTestCalls;
+            return [list.status, other.status, calls.other, otherSite.status, calls.otherSite, overridden.status, calls.list].join(" ");
+            """#, in: nil, in: .page) { retried = (try? $0.get()) as? String ?? "failed: \($0)" }
+        spin(until: { retried != nil }, seconds: 9)
+        check(retried == "200 429 1 429 1 200 2", "the chat list is asked for again after \"Too many requests\"; other requests aren't",
+              "list; another address, another site, a list request with its signal overridden (status, calls): \(retried ?? "nothing")")
+        userContent.removeAllUserScripts()
+        for script in pageScripts { userContent.addUserScript(script) }
 
         print(failures == 0 ? "panel self-test: ALL PASSED" : "panel self-test: \(failures) FAILED")
         return failures == 0

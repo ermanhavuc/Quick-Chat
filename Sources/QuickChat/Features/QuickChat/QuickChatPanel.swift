@@ -521,7 +521,8 @@ final class QuickChatController: NSObject {
 
     /// The page touch-ups, run at the start of every chatgpt.com page load.
     private func addUserScripts(to controller: WKUserContentController) {
-        for source in [Self.pageStyleScript, Self.dragScript, Self.chatOnlyScript, Self.shareInMenuScript, Self.readyScript] {
+        for source in [Self.pageStyleScript, Self.dragScript, Self.chatOnlyScript, Self.shareInMenuScript, Self.readyScript,
+                       Self.chatListRetryScript] {
             controller.addUserScript(WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         }
     }
@@ -782,6 +783,40 @@ final class QuickChatController: NSObject {
             else setTimeout(check, 50);
           };
           check();
+        }
+        """
+
+    /// ⌘K's recent chats come from your chat list, which chatgpt.com loads once per page; until
+    /// then it shows the titles it saved last time. When loading fails (it answers "Too many
+    /// requests" at times, for half a minute or so), the titles vanish, and it doesn't try again
+    /// until the page loads again, which in the panel can be days. So a failed request for the
+    /// list (too many requests, a server error, no connection) is made again after 2, 5, 10 and
+    /// 20 s before the page sees it fail, meanwhile showing the saved titles; it stops when the
+    /// page gives up on it (⌘K closed).
+    private static let chatListRetryScript = """
+        if (location.hostname === "chatgpt.com") {
+          const pageFetch = window.fetch;
+          const isChatList = (input, init) => {
+            const href = typeof input === "string" ? input : input instanceof URL ? input.href : input?.url;
+            const method = init?.method ?? (input instanceof Request ? input.method : "GET");
+            const url = href == null ? null : new URL(href, location.href);
+            return url?.origin === location.origin && url.pathname === "/backend-api/conversations" && method.toUpperCase() === "GET";
+          };
+          window.fetch = async function (input, init) {
+            if (!isChatList(input, init)) return pageFetch.apply(this, arguments);
+            const signal = init && "signal" in init ? init.signal : input instanceof Request ? input.signal : null;
+            for (const wait of [2000, 5000, 10000, 20000]) {
+              try {
+                const response = await pageFetch.apply(this, arguments);
+                if (response.status !== 429 && response.status < 500) return response;
+              } catch (error) {
+                if (signal?.aborted) throw error;
+              }
+              await new Promise(resolve => setTimeout(resolve, wait));
+              signal?.throwIfAborted();
+            }
+            return pageFetch.apply(this, arguments);
+          };
         }
         """
 
