@@ -276,7 +276,11 @@ final class QuickChatController: NSObject {
     func show() {
         releaseTimer?.invalidate()
         let panel = self.panel ?? makePanel()
-        if webView == nil { attachWebView(to: panel, loading: releasedURL ?? Self.temporaryChatURL) }
+        if webView == nil {
+            attachWebView(to: panel, loading: releasedURL ?? Self.temporaryChatURL)
+            if let snapshot = releasedSnapshot { coverWhileLoading(panel, with: snapshot) }
+            releasedSnapshot = nil
+        }
         let front = NSWorkspace.shared.frontmostApplication
         if front?.processIdentifier != ProcessInfo.processInfo.processIdentifier { previousApp = front }
         NSApp.activate()
@@ -298,11 +302,14 @@ final class QuickChatController: NSObject {
 
     /// chatgpt.com's page takes 0.4–0.7 GB in its web process (0.03 GB for the app itself), so
     /// after the panel has been hidden this long, its web view is released; showing the panel
-    /// again loads the page it was on, which takes about a second.
+    /// again loads the page it was on: about 1.5 s for a new chat, 2.5–3.5 s for a chat (mostly
+    /// chatgpt.com sending the page, then the chat). A picture of the panel covers the wait
+    /// (`coverWhileLoading`).
     private static let releaseDelay: TimeInterval = 10 * 60
     private var releaseTimer: Timer?
-    /// The page the released web view was on, for the next `show()`.
+    /// The page the released web view was on, and how it looked, for the next `show()`.
     private var releasedURL: URL?
+    private var releasedSnapshot: NSImage?
 
     /// Releases the hidden panel's web view, unless that would lose something: a temporary
     /// chat's messages (saved nowhere), something in the message box, a page other than
@@ -312,14 +319,125 @@ final class QuickChatController: NSObject {
         webView.evaluateJavaScript(Self.keepsPageScript) { [weak self] keeps, _ in
             MainActor.assumeIsolated {
                 guard let self, keeps as? Bool == false, self.webView === webView, !panel.isVisible else { return }
-                self.releasedURL = webView.url
-                webView.stopLoading()
-                panel.contentView = nil
-                self.webView = nil
-                self.log.info("Released the hidden panel's web view")
+                webView.takeSnapshot(with: nil) { [weak self] snapshot, _ in
+                    MainActor.assumeIsolated {
+                        guard let self, self.webView === webView, !panel.isVisible else { return }
+                        self.releasedURL = webView.url
+                        self.releasedSnapshot = snapshot
+                        webView.stopLoading()
+                        panel.contentView = nil
+                        self.webView = nil
+                        self.log.info("Released the hidden panel's web view")
+                    }
+                }
             }
         }
     }
+
+    /// Covers the reloading page with `snapshot`, the panel as it was before its page was
+    /// released, so it looks ready at once. What's typed meanwhile is kept (`collectTyping`).
+    /// Once the page has settled (`pageReadyScript`'s height unchanged for 0.4 s, at once on a
+    /// new-chat page), or after 8 s, the cover goes and the typed text goes into the message
+    /// box. A long chat settled after about 2.4 s: its messages came at 2.1 s, the last answer's
+    /// text at 2.4 s.
+    private func coverWhileLoading(_ panel: QuickChatPanel, with snapshot: NSImage) {
+        guard let webView else { return }
+        let cover = SnapshotCover(frame: webView.bounds)
+        cover.image = snapshot
+        cover.imageScaling = .scaleAxesIndependently
+        cover.autoresizingMask = [.width, .height]
+        webView.addSubview(cover)
+        self.cover = cover
+        typedWhileLoading = ""
+        settledHeight = nil
+        panel.typingInterceptor = { [weak self] in self?.collectTyping($0) ?? false }
+        let deadline = Date().addingTimeInterval(8)
+        coverTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if Date() > deadline { return self.uncover() }
+                self.webView?.evaluateJavaScript(Self.pageReadyScript) { [weak self] height, _ in
+                    MainActor.assumeIsolated { self?.pageReady(height: height as? Int ?? -1) }
+                }
+            }
+        }
+    }
+
+    private var cover: SnapshotCover?
+    private var coverTimer: Timer?
+    private var typedWhileLoading = ""
+    /// The page's last height from `pageReadyScript`, and since when it's been that.
+    private var settledHeight: (value: Int, since: Date)?
+
+    private func pageReady(height: Int) {
+        guard height >= 0 else { settledHeight = nil; return }
+        if height == 0 { return uncover() } // a new-chat page: nothing more to come
+        guard let settled = settledHeight, settled.value == height else { settledHeight = (height, Date()); return }
+        if Date().timeIntervalSince(settled.since) >= 0.4 { uncover() }
+    }
+
+    /// Takes the cover away and puts what was typed over it into the message box.
+    private func uncover() {
+        guard let cover else { return }
+        coverTimer?.invalidate()
+        coverTimer = nil
+        cover.removeFromSuperview()
+        self.cover = nil
+        panel?.typingInterceptor = nil
+        let text = typedWhileLoading
+        typedWhileLoading = ""
+        if text.isEmpty {
+            focusComposer()
+        } else {
+            webView?.callAsyncJavaScript(Self.typeScript, arguments: ["text": text], in: nil, in: .page)
+        }
+    }
+
+    /// Keys pressed over the cover: text is kept (Shift-Return for a line break, Delete takes
+    /// back the last character); Return alone does nothing, so a half-typed message isn't sent.
+    /// ⌘ and ⌃ combos, Esc, Tab and arrow keys go on as usual. Returns whether the key was taken.
+    private func collectTyping(_ event: NSEvent) -> Bool {
+        let flags = event.modifierFlags
+        guard !flags.contains(.command), !flags.contains(.control) else { return false }
+        switch event.keyCode {
+        case 51: // Delete
+            if !typedWhileLoading.isEmpty { typedWhileLoading.removeLast() }
+            return true
+        case 36, 76: // Return, Enter
+            if flags.contains(.shift) { typedWhileLoading += "\n" }
+            return true
+        default:
+            // Function and arrow keys come as private-use characters (U+F700…U+F8FF).
+            guard let text = event.characters, !text.isEmpty, text.unicodeScalars.allSatisfy({ scalar in
+                !CharacterSet.controlCharacters.contains(scalar) && !(0xF700...0xF8FF).contains(scalar.value)
+            }) else { return false }
+            typedWhileLoading += text
+            return true
+        }
+    }
+
+    /// For `coverWhileLoading`: -1 until the reloaded page shows its message box and, in a chat
+    /// (`/c/…`), its messages; then the chat's scroll height (0 on a new-chat page).
+    private static let pageReadyScript = """
+        (() => {
+          if (![...document.querySelectorAll('#prompt-textarea, form [contenteditable="true"]')].some(e => e.getClientRects().length)) return -1;
+          if (location.pathname.startsWith("/c/") && !(\(hasMessagesScript))) return -1;
+          return [...document.querySelectorAll(".thread-scroll-container")].find(e => e.getClientRects().length)?.scrollHeight ?? 0;
+        })()
+        """
+
+    /// Types `text` at the end of the message box, as typing would.
+    private static let typeScript = """
+        const box = [...document.querySelectorAll('#prompt-textarea, form [contenteditable="true"]')].find(e => e.getClientRects().length);
+        if (!box) return;
+        box.focus();
+        const end = document.createRange();
+        end.selectNodeContents(box);
+        end.collapse(false);
+        getSelection().removeAllRanges();
+        getSelection().addRange(end);
+        document.execCommand("insertText", false, text);
+        """
 
     /// Whether the page has something a reload would lose (see `releaseWebViewIfIdle`). The
     /// message box's send button is enabled while it holds text or attachments.
@@ -332,6 +450,7 @@ final class QuickChatController: NSObject {
     /// Closes the panel and releases the web view (the sign-in session stays in the data store).
     func tearDown() {
         releaseTimer?.invalidate()
+        coverTimer?.invalidate()
         for popup in popups { popup.close() }
         panel?.orderOut(nil)
         webView?.stopLoading()
@@ -888,6 +1007,13 @@ final class QuickChatWebView: WKWebView {
     }
 }
 
+/// A picture of the panel over its reloading page (`QuickChatController.coverWhileLoading`). It
+/// takes the clicks meant for what it shows, so they don't land on the half-loaded page.
+final class SnapshotCover: NSImageView {
+    override func mouseDown(with event: NSEvent) {}
+    override func rightMouseDown(with event: NSEvent) {}
+}
+
 // MARK: - Panel
 
 final class QuickChatPanel: NSPanel {
@@ -919,6 +1045,8 @@ final class QuickChatPanel: NSPanel {
     private var isSettingFrame = false
     /// The last left mouse-down in the panel, for `dragFromPage()`.
     private var lastMouseDown: NSEvent?
+    /// While set, sees each key press before the page; returning true keeps it from the page.
+    var typingInterceptor: ((NSEvent) -> Bool)?
 
     init(contentRect: NSRect) {
         super.init(contentRect: contentRect,
@@ -1044,6 +1172,7 @@ final class QuickChatPanel: NSPanel {
     /// `dragFromPage`.
     override func sendEvent(_ event: NSEvent) {
         if event.type == .keyDown, handleLocalShortcut(event) { return }
+        if event.type == .keyDown, let typingInterceptor, typingInterceptor(event) { return }
         if event.type == .leftMouseDown { lastMouseDown = event }
         if event.type == .leftMouseDown,
            event.modifierFlags.intersection([.shift, .control, .option, .command]) == [.control, .command] {

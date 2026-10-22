@@ -203,6 +203,20 @@ enum PanelSelfTest {
         let reopened = panel.contentView.flatMap(webView(in:))
         check(reopened != nil && reopened !== webView && reopened?.url == page, "shown again: a new web view on the same page",
               "\(reopened?.url?.absoluteString ?? "none") vs \(page?.absoluteString ?? "none")")
+        let covered = { reopened?.subviews.contains { $0 is SnapshotCover } == true }
+        check(covered(), "a picture of the page covers it while it loads")
+        for key in ["h", "i"] {
+            panel.sendEvent(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                                             windowNumber: panel.windowNumber, context: nil, characters: key,
+                                             charactersIgnoringModifiers: key, isARepeat: false, keyCode: 0)!)
+        }
+        spin(until: { !covered() }, seconds: 10)
+        var typed: String?
+        let readBox = #"[...document.querySelectorAll('form [contenteditable="true"]')].find(e => e.getClientRects().length)?.innerText.trim() ?? ''"#
+        reopened?.evaluateJavaScript(readBox) { value, _ in typed = value as? String }
+        spin(until: { typed != nil }, seconds: 3)
+        check(!covered() && typed == "hi", "the picture goes once the page is ready, and what was typed is in the message box",
+              "covered: \(covered()), box: \(typed ?? "nil")")
 
         print(failures == 0 ? "panel self-test: ALL PASSED" : "panel self-test: \(failures) FAILED")
         return failures == 0
