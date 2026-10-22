@@ -604,12 +604,17 @@ final class QuickChatController: NSObject {
     ///   The scroll area now ends 16px above the box (the gap at its sides), so its scroll bar
     ///   and text end there too, and the spacer is gone. The variable is the strip's height plus
     ///   that 16px (the spacer subtracts it), so the scroll area is the panel minus the variable.
+    /// - In the narrow layout, the top bar's buttons sat 8px from the panel's sides, half the
+    ///   16px of the chat text and the message box, so they didn't line up. The bar now adds
+    ///   the difference on both sides (its buttons keep chatgpt.com's 0.5rem inside it). The wide
+    ///   layout centers its chat, so its bar stays as it is.
     /// If chatgpt.com renames these hooks, the rules stop matching and the page looks as before.
     private static let pageLayoutCSS = """
         body, body [data-theme] { --thread-composer-bottom-inset: var(--thread-body-inline-padding, 1rem); }
         @media not all and (min-width: 40rem) {
           [class~="max-sm:pb-6"]:has(form) { padding-bottom: var(--thread-body-inline-padding, 1rem); }
           [class~="max-sm:[scrollbar-gutter:stable]"] { scrollbar-gutter: auto; }
+          main > header.draggable { padding-inline: calc(var(--thread-body-inline-padding, 1rem) - 0.5rem); }
         }
         [class*="ComposerBannerPortal-"] [class~="text-codex-description"] { display: none; }
         [class*="ComposerBannerPortal-"]:has(> * > [class~="text-codex-description"]):not(:has(> * > :not([class~="text-codex-description"]))) {

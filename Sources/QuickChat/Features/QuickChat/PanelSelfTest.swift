@@ -262,6 +262,22 @@ enum PanelSelfTest {
         check(evaluate(#"document.documentElement.hasAttribute("data-quick-chat-temporary")"#) as? Bool == true,
               "the temporary chat is marked (its message box says so)")
         check((evaluate("document.cookie") as? String)?.contains("codex_composer_mode=chat") == true, "Chat mode, not Work")
+        panel.setContentSize(QuickChatPanel.defaultSize) // the narrow layout (section 6 left it at 600 pt)
+        spin(until: { false }, seconds: 0.5)
+        let barEdges = evaluate(#"""
+            (() => {
+              const root = document.documentElement, hidden = root.hasAttribute("data-quick-chat-hide-top-bar");
+              root.removeAttribute("data-quick-chat-hide-top-bar");
+              const shown = e => e.getClientRects().length && getComputedStyle(e).visibility !== "hidden";
+              const bar = [...document.querySelectorAll("main > header.draggable")].find(shown);
+              const button = bar && [...bar.querySelectorAll("button")].filter(shown).at(-1);
+              const box = [...document.querySelectorAll('form [class*="ComposerLayoutRoot-"]')].filter(shown).pop();
+              const gap = button && box ? Math.abs(box.getBoundingClientRect().right - button.getBoundingClientRect().right).toFixed(1) : "no bar";
+              root.toggleAttribute("data-quick-chat-hide-top-bar", hidden);
+              return gap;
+            })()
+            """#) as? String
+        check(barEdges == "0.0", "the top bar's buttons line up with the message box's sides", "\(barEdges ?? "nothing") px apart")
         let titleInBar = #"getComputedStyle(document.documentElement).getPropertyValue("--quick-chat-title")"#
         check(evaluate(titleInBar) as? String == "", "no title in the top bar on the new-chat page")
         _ = evaluate(#"""
