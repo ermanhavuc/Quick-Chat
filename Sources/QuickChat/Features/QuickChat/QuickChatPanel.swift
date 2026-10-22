@@ -274,7 +274,9 @@ final class QuickChatController: NSObject {
     }
 
     func show() {
+        releaseTimer?.invalidate()
         let panel = self.panel ?? makePanel()
+        if webView == nil { attachWebView(to: panel, loading: releasedURL ?? Self.temporaryChatURL) }
         let front = NSWorkspace.shared.frontmostApplication
         if front?.processIdentifier != ProcessInfo.processInfo.processIdentifier { previousApp = front }
         NSApp.activate()
@@ -288,10 +290,48 @@ final class QuickChatController: NSObject {
         guard let panel, panel.isVisible else { return }
         panel.orderOut(nil)
         if restoreFocus { previousApp?.activate() }
+        releaseTimer?.invalidate()
+        releaseTimer = Timer.scheduledTimer(withTimeInterval: Self.releaseDelay, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.releaseWebViewIfIdle() }
+        }
     }
+
+    /// chatgpt.com's page takes 0.4–0.7 GB in its web process (0.03 GB for the app itself), so
+    /// after the panel has been hidden this long, its web view is released; showing the panel
+    /// again loads the page it was on, which takes about a second.
+    private static let releaseDelay: TimeInterval = 10 * 60
+    private var releaseTimer: Timer?
+    /// The page the released web view was on, for the next `show()`.
+    private var releasedURL: URL?
+
+    /// Releases the hidden panel's web view, unless that would lose something: a temporary
+    /// chat's messages (saved nowhere), something in the message box, a page other than
+    /// chatgpt.com (a sign-in), or a sign-in popup (it reports back to the panel's page).
+    func releaseWebViewIfIdle() {
+        guard let panel, !panel.isVisible, let webView, popups.isEmpty else { return }
+        webView.evaluateJavaScript(Self.keepsPageScript) { [weak self] keeps, _ in
+            MainActor.assumeIsolated {
+                guard let self, keeps as? Bool == false, self.webView === webView, !panel.isVisible else { return }
+                self.releasedURL = webView.url
+                webView.stopLoading()
+                panel.contentView = nil
+                self.webView = nil
+                self.log.info("Released the hidden panel's web view")
+            }
+        }
+    }
+
+    /// Whether the page has something a reload would lose (see `releaseWebViewIfIdle`). The
+    /// message box's send button is enabled while it holds text or attachments.
+    private static let keepsPageScript = """
+        location.hostname !== "chatgpt.com"
+          || (new URLSearchParams(location.search).get("temporary-chat") === "true" && \(hasMessagesScript))
+          || [...document.querySelectorAll('form button[type="submit"]')].some(b => b.getClientRects().length && !b.disabled)
+        """
 
     /// Closes the panel and releases the web view (the sign-in session stays in the data store).
     func tearDown() {
+        releaseTimer?.invalidate()
         for popup in popups { popup.close() }
         panel?.orderOut(nil)
         webView?.stopLoading()
@@ -323,8 +363,7 @@ final class QuickChatController: NSObject {
         panel.resetSizeShortcut = resetSizeShortcut
         panel.maximizeShortcut = maximizeShortcut
 
-        let webView = makeWebView()
-        panel.setContent(webView)
+        attachWebView(to: panel, loading: Self.temporaryChatURL)
 
         if !panel.setFrameUsingName(QuickChatPanel.autosaveName) {
             // First open: the bottom center of the screen with the mouse.
@@ -336,9 +375,16 @@ final class QuickChatController: NSObject {
         panel.setFrameAutosaveName(QuickChatPanel.autosaveName)
 
         self.panel = panel
-        self.webView = webView
-        webView.load(URLRequest(url: Self.temporaryChatURL))
         return panel
+    }
+
+    /// A new web view in `panel`, loading `url`: when the panel is built, and after
+    /// `releaseWebViewIfIdle`.
+    private func attachWebView(to panel: QuickChatPanel, loading url: URL) {
+        let webView = makeWebView()
+        panel.setContent(webView)
+        self.webView = webView
+        webView.load(URLRequest(url: url))
     }
 
     /// A window for a page opened with `window.open` / target=_blank, like a browser's popup. The
