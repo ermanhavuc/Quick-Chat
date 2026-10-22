@@ -626,8 +626,8 @@ final class QuickChatController: NSObject {
     ///   16px, so the scroll area is the panel minus the variable, plus 16px.
     /// - Text in a chat stopped at the scroll area's edges as if cut off. It now fades out over
     ///   16px: at the bottom, in the gap above the message box; at the top, from where the
-    ///   scroll area starts (`--quick-chat-fade-top`: 16px under the top bar's buttons when the
-    ///   bar is shown, see `glassCSS`), in its padding, so a chat's first message isn't faded.
+    ///   scroll area starts (`--quick-chat-fade-top`: the top bar's buttons when the bar is
+    ///   shown, see `glassCSS`), in its padding, so a chat's first message isn't faded.
     ///   The scroll area itself can't take the mask: WebKit then also hides the message box,
     ///   which sits inside it in the page but is placed (and drawn) below it. So the mask goes
     ///   on its parent, which holds both and doesn't scroll, and is opaque again from the
@@ -673,8 +673,11 @@ final class QuickChatController: NSObject {
     /// - The message box and the top bar's buttons get a see-through white fill: 7% in Dark mode,
     ///   70% in Light mode (chatgpt.com's solid white box looked pasted on). Menus, dialogs and
     ///   the narrow layout's sliding sidebar keep their solid Mac colors.
-    /// - With the top bar shown (⌘\), a chat's scroll area starts 16px below its buttons, so
-    ///   text doesn't run behind the see-through bar, and its text fades out from there.
+    /// - With the top bar shown (⌘\), a chat's scroll area starts at its buttons' bottom edge,
+    ///   so text doesn't run behind the see-through bar, and mirrors the message box: a chat
+    ///   starts 16px under the buttons, and its text fades out in that gap. chatgpt.com's
+    ///   floating inset is 16px under the buttons; in the layout that starts the content frame
+    ///   below the bar (it's 8px there), the scroll area's parent moves up to reach them.
     /// chatgpt.com paints the root and body through an attribute selector; `:root` ties with it
     /// and wins as the later sheet.
     private static let glassCSS = """
@@ -693,12 +696,13 @@ final class QuickChatController: NSObject {
           background-color: var(--quick-chat-glass-fill);
         }
         :root:not([data-quick-chat-hide-top-bar]) main:has(> header.draggable) .thread-scroll-container {
-          margin-top: var(--thread-floating-content-top-inset, 60px);
-          padding-top: calc(var(--thread-content-top-inset, 84px) - var(--thread-floating-content-top-inset, 60px));
-          max-height: calc(100% - var(--thread-scroll-padding-bottom, 0px) + 1rem - var(--thread-floating-content-top-inset, 60px));
+          margin-top: var(--quick-chat-fade-top);
+          padding-top: 1rem;
+          max-height: calc(100% - var(--thread-scroll-padding-bottom, 0px) + 1rem - var(--quick-chat-fade-top));
         }
         :root:not([data-quick-chat-hide-top-bar]) main:has(> header.draggable) :has(> .thread-scroll-container) {
-          --quick-chat-fade-top: var(--thread-floating-content-top-inset, 60px);
+          --quick-chat-fade-top: max(0px, calc(var(--thread-floating-content-top-inset, 60px) - 1rem));
+          margin-top: min(0px, calc(var(--thread-floating-content-top-inset, 60px) - 1rem));
         }
         """
 
