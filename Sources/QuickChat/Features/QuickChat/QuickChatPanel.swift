@@ -100,9 +100,8 @@ final class QuickChatController: NSObject {
     /// ⌘\: shows or hides chatgpt.com's top bar.
     func toggleTopBar() { hidesTopBar.toggle() }
 
-    /// The top bar's height in CSS pixels: chatgpt.com's 36px buttons with 16px above and below
-    /// (`pageLayoutCSS`; chatgpt.com's own bar is 52px, its --height-toolbar).
-    static let topBarHeight: CGFloat = 68
+    /// chatgpt.com's top bar height (its --height-toolbar), in CSS pixels.
+    static let topBarHeight: CGFloat = 52
 
     /// While the top bar is shown, a first click on its band reaches the page (see `QuickChatWebView`).
     private func updateFirstClickBand() {
@@ -580,11 +579,13 @@ final class QuickChatController: NSObject {
         """
 
     /// Layout fixes for chatgpt.com's browser-tab layout, which shows a bit off in the panel:
-    /// - The gap under the message box is 24px in a chat, and on the new-chat page 24px plus a
+    /// - The message box sat 16px from the panel's sides (--thread-body-inline-padding, as the
+    ///   chat text) and 24px from its bottom in a chat; on the new-chat page, 24px plus a
     ///   16px-padded notice slot under the box (empty, or "For safety, we may keep a copy of this
-    ///   chat…" in a temporary chat), against 16px at the sides; it showed as a dark strip under
-    ///   the box. The notice is hidden and the gap matches the sides (both follow
-    ///   --thread-body-inline-padding). Other banners in that slot keep their space.
+    ///   chat…" in a temporary chat), which showed as a dark strip under the box. The box now
+    ///   sits 8px from the sides and the bottom, as the top bar's buttons do from the top and
+    ///   sides; the chat text keeps its 16px. The notice is hidden; other banners in that slot
+    ///   keep their space.
     /// - The top bar is transparent, with only its button groups on pills, so a chat scrolled
     ///   under it showed through between and around the buttons. It now gets the page's surface
     ///   color, as the pills have.
@@ -602,41 +603,16 @@ final class QuickChatController: NSObject {
     ///   strip (chatgpt.com measures it into --thread-scroll-padding-bottom) let the last message
     ///   scroll above it. So text ran right up to the box, and with a mouse connected the scroll
     ///   bar ran down beside the box, its thumb hidden behind the strip at the end of a chat.
-    ///   The scroll area now ends 16px above the box (the gap at its sides), so its scroll bar
-    ///   and text end there too, and the spacer is gone. The variable is the strip's height plus
-    ///   that 16px (the spacer subtracts it), so the scroll area is the panel minus the variable.
-    /// - The top bar's 36px buttons sat 8px from the panel's top and sides, half the 16px the
-    ///   chat text and the message box keep from the sides (and the box from the bottom). The
-    ///   bar is now `topBarHeight` tall, so its buttons sit 16px from the top, and it adds 8px
-    ///   at its ends (its buttons keep chatgpt.com's 0.5rem inside it), so they sit 16px from
-    ///   the sides too, in line with the text and the box. From 768px wide, the bar's left end
-    ///   keeps room for chatgpt.com's icon rail (gone, `chatOnlyCSS`) and New chat already sits
-    ///   16px into the chat's surface, so only the right end changes there. While the bar is
-    ///   shown, a chat's top insets (made for chatgpt.com's 52px bar) follow it, so the chat
-    ///   starts 16px under the buttons and its first line 24px further down. A saved chat's
-    ///   frame starts at the panel's top and counts the bar in those insets; a temporary
-    ///   chat's frame started below the bar (data-app-shell-header-edge-scroll=false), which
-    ///   pushed its chat down twice, so it starts at the top too. The new-chat pages keep their
-    ///   layout, which centers their heading below the bar.
+    ///   The scroll area now ends 16px above the box (as it starts 16px under the top bar's
+    ///   buttons), so its scroll bar and text end there too, and the spacer is gone. The
+    ///   variable is the strip's height plus that 16px (the spacer subtracts it), so the scroll
+    ///   area is the panel minus the variable.
     /// If chatgpt.com renames these hooks, the rules stop matching and the page looks as before.
     private static let pageLayoutCSS = """
-        body, body [data-theme] { --thread-composer-bottom-inset: var(--thread-body-inline-padding, 1rem); }
-        main > header.draggable {
-          height: \(Int(topBarHeight))px;
-          --app-shell-titlebar-height: \(Int(topBarHeight))px;
-          --app-shell-header-height: \(Int(topBarHeight))px;
-          padding-inline-end: 0.5rem;
-        }
-        @media not all and (min-width: 768px) {
-          main > header.draggable { padding-inline-start: 0.5rem; }
-        }
-        :root:not([data-quick-chat-hide-top-bar]) [class*="MainContentFrame-"]:has(.thread-scroll-container) {
-          --app-shell-main-content-frame-top-offset: 0px;
-          --thread-floating-content-top-inset: \(Int(topBarHeight))px;
-          --thread-content-top-inset: calc(\(Int(topBarHeight))px + 1.5rem);
-        }
+        body, body [data-theme] { --thread-composer-bottom-inset: 0.5rem; }
+        [class*="footer-"][class~="bottom-0"]:has(form), [class~="max-sm:pb-6"]:has(form) { --thread-body-inline-padding: 0.5rem; }
         @media not all and (min-width: 40rem) {
-          [class~="max-sm:pb-6"]:has(form) { padding-bottom: var(--thread-body-inline-padding, 1rem); }
+          [class~="max-sm:pb-6"]:has(form) { padding-bottom: var(--thread-composer-bottom-inset, 0.5rem); }
           [class~="max-sm:[scrollbar-gutter:stable]"] { scrollbar-gutter: auto; }
         }
         [class*="ComposerBannerPortal-"] [class~="text-codex-description"] { display: none; }

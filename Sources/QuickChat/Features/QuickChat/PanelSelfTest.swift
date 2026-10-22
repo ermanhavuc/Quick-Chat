@@ -278,26 +278,23 @@ enum PanelSelfTest {
             """#) as? String
         check(barEdges == "0 0", "the top bar's buttons sit as far from the panel's top and side as the message box from its bottom and side",
               "\(barEdges ?? "nothing") px off (side, top)")
-        // A temporary chat's frame is pushed down by the bar's height (from its parent); a chat's
-        // area must start right under the bar all the same, not a bar's height lower.
-        let chatFrame = evaluate(#"""
+        // The side spacing chatgpt.com gives the chat text and the message box alike: the chat's, and the box's.
+        let sides = evaluate(#"""
             (() => {
-              const root = document.documentElement, hidden = root.hasAttribute("data-quick-chat-hide-top-bar");
-              root.removeAttribute("data-quick-chat-hide-top-bar");
-              const viewport = document.createElement("div");
-              viewport.style.setProperty("--app-shell-main-content-frame-top-offset", "52px");
-              viewport.innerHTML = '<div class="MainContentFrame-quick-chat-self-test"><div class="thread-scroll-container"></div></div>';
-              document.body.append(viewport);
-              const style = getComputedStyle(viewport.firstElementChild);
-              const result = ["--app-shell-main-content-frame-top-offset", "--thread-floating-content-top-inset"]
-                .map(name => style.getPropertyValue(name).trim()).join(" ");
-              viewport.remove();
-              root.toggleAttribute("data-quick-chat-hide-top-bar", hidden);
-              return result;
+              const probe = parent => {
+                const div = document.createElement("div");
+                div.style.paddingLeft = "var(--thread-body-inline-padding)";
+                parent.append(div);
+                const value = getComputedStyle(div).paddingLeft;
+                div.remove();
+                return value;
+              };
+              const strip = [...document.querySelectorAll('[class~="max-sm:pb-6"]')].find(e => e.querySelector("form") && e.getClientRects().length);
+              return [probe(document.body), strip ? probe(strip) : "no message box"].join(" ");
             })()
             """#) as? String
-        check(chatFrame == "0px \(Int(QuickChatController.topBarHeight))px", "a chat, also a temporary one, starts right under the top bar",
-              "frame offset and inset: \(chatFrame ?? "nothing")")
+        check(sides == "16px 8px", "the chat keeps chatgpt.com's 16px at the sides; the message box sits 8px in",
+              "chat, box: \(sides ?? "nothing")")
         let titleInBar = #"getComputedStyle(document.documentElement).getPropertyValue("--quick-chat-title")"#
         check(evaluate(titleInBar) as? String == "", "no title in the top bar on the new-chat page")
         _ = evaluate(#"""
