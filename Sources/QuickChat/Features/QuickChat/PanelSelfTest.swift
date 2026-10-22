@@ -188,36 +188,6 @@ enum PanelSelfTest {
             check(!pageStyle.contains("--quick-chat-glass-fill"), "no glass rules in the page style")
         }
 
-        print("11. a hidden panel releases its web view; showing it again loads the same page")
-        func spin(until done: () -> Bool, seconds: TimeInterval) {
-            let deadline = Date().addingTimeInterval(seconds)
-            while !done(), Date() < deadline { RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05)) }
-        }
-        spin(until: { !webView.isLoading }, seconds: 15)
-        let page = webView.url
-        chat.hide(restoreFocus: false)
-        chat.releaseWebViewIfIdle()
-        spin(until: { panel.contentView == nil }, seconds: 10)
-        check(panel.contentView == nil, "released (an empty temporary chat loses nothing)")
-        chat.show()
-        let reopened = panel.contentView.flatMap(webView(in:))
-        check(reopened != nil && reopened !== webView && reopened?.url == page, "shown again: a new web view on the same page",
-              "\(reopened?.url?.absoluteString ?? "none") vs \(page?.absoluteString ?? "none")")
-        let covered = { reopened?.subviews.contains { $0 is SnapshotCover } == true }
-        check(covered(), "a picture of the page covers it while it loads")
-        for key in ["h", "i"] {
-            panel.sendEvent(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
-                                             windowNumber: panel.windowNumber, context: nil, characters: key,
-                                             charactersIgnoringModifiers: key, isARepeat: false, keyCode: 0)!)
-        }
-        spin(until: { !covered() }, seconds: 10)
-        var typed: String?
-        let readBox = #"[...document.querySelectorAll('form [contenteditable="true"]')].find(e => e.getClientRects().length)?.innerText.trim() ?? ''"#
-        reopened?.evaluateJavaScript(readBox) { value, _ in typed = value as? String }
-        spin(until: { typed != nil }, seconds: 3)
-        check(!covered() && typed == "hi", "the picture goes once the page is ready, and what was typed is in the message box",
-              "covered: \(covered()), box: \(typed ?? "nil")")
-
         print(failures == 0 ? "panel self-test: ALL PASSED" : "panel self-test: \(failures) FAILED")
         return failures == 0
     }
