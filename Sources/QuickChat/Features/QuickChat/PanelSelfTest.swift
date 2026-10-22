@@ -398,6 +398,34 @@ enum PanelSelfTest {
         spin(until: { webView.alphaValue == 1 }, seconds: 1)
         check(webView.alphaValue == 1, "… and the page is fully there")
 
+        print("19. a chat's text fades out at its scroll area's top and bottom, not over the message box")
+        // A stand-in for a chat's scroll area: its parent takes the fade, which needs the height
+        // chatgpt.com gives the scroll area for the strip under it (the message box's).
+        let fade = #"""
+            (() => {
+              const parent = document.getElementById("quick-chat-self-test-thread");
+              return parent.style.getPropertyValue("--quick-chat-thread-scroll-padding-bottom") + " " + (getComputedStyle(parent).maskImage !== "none");
+            })()
+            """#
+        _ = evaluate(#"""
+            const parent = document.createElement("div");
+            parent.id = "quick-chat-self-test-thread";
+            parent.innerHTML = '<div class="thread-scroll-container" style="--thread-scroll-padding-bottom: 100px"></div>';
+            document.body.append(parent);
+            true
+            """#)
+        spin(until: { false }, seconds: 0.2)
+        let opened = evaluate(fade) as? String
+        check(opened == "100px true", "a chat opens: its scroll area's parent gets the strip's height and the fade", opened ?? "nothing")
+        _ = evaluate(#"""
+            document.getElementById("quick-chat-self-test-thread").firstElementChild.style.setProperty("--thread-scroll-padding-bottom", "150px");
+            true
+            """#)
+        spin(until: { false }, seconds: 0.2)
+        let grown = evaluate(fade) as? String
+        check(grown == "150px true", "the message box grows: the fade's bottom follows it", grown ?? "nothing")
+        _ = evaluate(#"document.getElementById("quick-chat-self-test-thread").remove(); true"#)
+
         print(failures == 0 ? "panel self-test: ALL PASSED" : "panel self-test: \(failures) FAILED")
         return failures == 0
     }

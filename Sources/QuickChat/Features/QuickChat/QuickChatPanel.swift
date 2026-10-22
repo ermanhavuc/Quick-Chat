@@ -621,10 +621,17 @@ final class QuickChatController: NSObject {
     ///   strip (chatgpt.com measures it into --thread-scroll-padding-bottom) let the last message
     ///   scroll above it. So text ran right up to the box, and with a mouse connected the scroll
     ///   bar ran down beside the box, its thumb hidden behind the strip at the end of a chat.
-    ///   The scroll area now ends 16px above the box (as it starts 16px under the top bar's
-    ///   buttons), so its scroll bar and text end there too, and the spacer is gone. The
-    ///   variable is the strip's height plus that 16px (the spacer subtracts it), so the scroll
-    ///   area is the panel minus the variable.
+    ///   The scroll area now ends at the box's top edge, and the spacer is cut to 16px, so a
+    ///   chat's end stops 16px above the box. The variable is the strip's height plus that
+    ///   16px, so the scroll area is the panel minus the variable, plus 16px.
+    /// - Text in a chat stopped at the scroll area's edges as if cut off. It now fades out over
+    ///   16px: at the bottom, in the gap above the message box; at the top, from where the
+    ///   scroll area starts (`--quick-chat-fade-top`: 16px under the top bar's buttons when the
+    ///   bar is shown, see `glassCSS`), in its padding, so a chat's first message isn't faded.
+    ///   The scroll area itself can't take the mask: WebKit then also hides the message box,
+    ///   which sits inside it in the page but is placed (and drawn) below it. So the mask goes
+    ///   on its parent, which holds both and doesn't scroll, and is opaque again from the
+    ///   strip down; `pageStyleScript` copies the variable there, as the parent can't read it.
     /// If chatgpt.com renames these hooks, the rules stop matching and the page looks as before.
     private static let pageLayoutCSS = """
         body, body [data-theme] { --thread-composer-bottom-inset: 0.5rem; }
@@ -643,10 +650,17 @@ final class QuickChatController: NSObject {
         [class*="transcriptContent-"] > [class~="pb-5"] { padding-bottom: 0; }
         [class*="transcriptContent-"] > [class~="pb-5"] > :last-child:empty { margin-top: -0.375rem; }
         .thread-scroll-container {
-          max-height: calc(100% - var(--thread-scroll-padding-bottom, 0px));
-          scroll-padding-bottom: 0;
+          max-height: calc(100% - var(--thread-scroll-padding-bottom, 0px) + 1rem);
+          scroll-padding-bottom: 1rem;
         }
-        .thread-scroll-container [class*="h-[calc(var(--thread-scroll-padding-bottom)"] { height: 0; }
+        .thread-scroll-container [class*="h-[calc(var(--thread-scroll-padding-bottom)"] { height: 1rem; }
+        :has(> .thread-scroll-container) {
+          mask-image: linear-gradient(to bottom,
+            transparent var(--quick-chat-fade-top, 0px), #000 calc(var(--quick-chat-fade-top, 0px) + 1rem),
+            #000 calc(100% - var(--quick-chat-thread-scroll-padding-bottom)),
+            transparent calc(100% - var(--quick-chat-thread-scroll-padding-bottom) + 1rem),
+            #000 calc(100% - var(--quick-chat-thread-scroll-padding-bottom) + 1rem));
+        }
         """
 
     /// Liquid Glass (macOS 26 and later; see `QuickChatPanel.setContent`): the page lets the
@@ -659,8 +673,8 @@ final class QuickChatController: NSObject {
     /// - The message box and the top bar's buttons get a see-through white fill: 7% in Dark mode,
     ///   70% in Light mode (chatgpt.com's solid white box looked pasted on). Menus, dialogs and
     ///   the narrow layout's sliding sidebar keep their solid Mac colors.
-    /// - With the top bar shown (⌘\), a chat's scroll area starts 16px below its buttons, as it
-    ///   ends 16px above the message box, so text doesn't run behind the see-through bar.
+    /// - With the top bar shown (⌘\), a chat's scroll area starts 16px below its buttons, so
+    ///   text doesn't run behind the see-through bar, and its text fades out from there.
     /// chatgpt.com paints the root and body through an attribute selector; `:root` ties with it
     /// and wins as the later sheet.
     private static let glassCSS = """
@@ -681,7 +695,10 @@ final class QuickChatController: NSObject {
         :root:not([data-quick-chat-hide-top-bar]) main:has(> header.draggable) .thread-scroll-container {
           margin-top: var(--thread-floating-content-top-inset, 60px);
           padding-top: calc(var(--thread-content-top-inset, 84px) - var(--thread-floating-content-top-inset, 60px));
-          max-height: calc(100% - var(--thread-scroll-padding-bottom, 0px) - var(--thread-floating-content-top-inset, 60px));
+          max-height: calc(100% - var(--thread-scroll-padding-bottom, 0px) + 1rem - var(--thread-floating-content-top-inset, 60px));
+        }
+        :root:not([data-quick-chat-hide-top-bar]) main:has(> header.draggable) :has(> .thread-scroll-container) {
+          --quick-chat-fade-top: var(--thread-floating-content-top-inset, 60px);
         }
         """
 
@@ -748,12 +765,24 @@ final class QuickChatController: NSObject {
     }
 
     /// Adds `pageCSS` as a constructed style sheet, which survives the page re-rendering its own
-    /// DOM. Its rules aren't in a cascade layer, so they beat chatgpt.com's.
+    /// DOM. Its rules aren't in a cascade layer, so they beat chatgpt.com's. Keeps a copy of a
+    /// chat's --thread-scroll-padding-bottom, which chatgpt.com sets on its scroll area, on the
+    /// scroll area's parent for the chat's fade (`pageLayoutCSS`), as a chat opens and as the
+    /// message box grows or shrinks.
     private static let pageStyleScript = """
         if (location.hostname === "chatgpt.com") {
           const sheet = new CSSStyleSheet();
           sheet.replaceSync(\(String(decoding: try! JSONEncoder().encode(pageCSS), as: UTF8.self)));
           document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+          const scrollAreas = document.getElementsByClassName("thread-scroll-container");
+          new MutationObserver(() => {
+            for (const area of scrollAreas) {
+              const value = area.style.getPropertyValue("--thread-scroll-padding-bottom"), parent = area.parentElement;
+              if (parent && parent.style.getPropertyValue("--quick-chat-thread-scroll-padding-bottom") !== value) {
+                parent.style.setProperty("--quick-chat-thread-scroll-padding-bottom", value);
+              }
+            }
+          }).observe(document, {subtree: true, childList: true, attributes: true, attributeFilter: ["style"]});
         }
         """
 
