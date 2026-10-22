@@ -278,6 +278,26 @@ enum PanelSelfTest {
             """#) as? String
         check(barEdges == "0 0", "the top bar's buttons sit as far from the panel's top and side as the message box from its bottom and side",
               "\(barEdges ?? "nothing") px off (side, top)")
+        // A temporary chat's frame is pushed down by the bar's height (from its parent); a chat's
+        // area must start right under the bar all the same, not a bar's height lower.
+        let chatFrame = evaluate(#"""
+            (() => {
+              const root = document.documentElement, hidden = root.hasAttribute("data-quick-chat-hide-top-bar");
+              root.removeAttribute("data-quick-chat-hide-top-bar");
+              const viewport = document.createElement("div");
+              viewport.style.setProperty("--app-shell-main-content-frame-top-offset", "52px");
+              viewport.innerHTML = '<div class="MainContentFrame-quick-chat-self-test"><div class="thread-scroll-container"></div></div>';
+              document.body.append(viewport);
+              const style = getComputedStyle(viewport.firstElementChild);
+              const result = ["--app-shell-main-content-frame-top-offset", "--thread-floating-content-top-inset"]
+                .map(name => style.getPropertyValue(name).trim()).join(" ");
+              viewport.remove();
+              root.toggleAttribute("data-quick-chat-hide-top-bar", hidden);
+              return result;
+            })()
+            """#) as? String
+        check(chatFrame == "0px \(Int(QuickChatController.topBarHeight))px", "a chat, also a temporary one, starts right under the top bar",
+              "frame offset and inset: \(chatFrame ?? "nothing")")
         let titleInBar = #"getComputedStyle(document.documentElement).getPropertyValue("--quick-chat-title")"#
         check(evaluate(titleInBar) as? String == "", "no title in the top bar on the new-chat page")
         _ = evaluate(#"""

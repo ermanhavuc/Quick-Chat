@@ -612,8 +612,12 @@ final class QuickChatController: NSObject {
     ///   the sides too, in line with the text and the box. From 768px wide, the bar's left end
     ///   keeps room for chatgpt.com's icon rail (gone, `chatOnlyCSS`) and New chat already sits
     ///   16px into the chat's surface, so only the right end changes there. While the bar is
-    ///   shown, the chat's top insets (made for chatgpt.com's 52px bar) follow it, so the chat
-    ///   still starts 16px under the buttons and its first line 24px further down.
+    ///   shown, a chat's top insets (made for chatgpt.com's 52px bar) follow it, so the chat
+    ///   starts 16px under the buttons and its first line 24px further down. A saved chat's
+    ///   frame starts at the panel's top and counts the bar in those insets; a temporary
+    ///   chat's frame started below the bar (data-app-shell-header-edge-scroll=false), which
+    ///   pushed its chat down twice, so it starts at the top too. The new-chat pages keep their
+    ///   layout, which centers their heading below the bar.
     /// If chatgpt.com renames these hooks, the rules stop matching and the page looks as before.
     private static let pageLayoutCSS = """
         body, body [data-theme] { --thread-composer-bottom-inset: var(--thread-body-inline-padding, 1rem); }
@@ -626,7 +630,8 @@ final class QuickChatController: NSObject {
         @media not all and (min-width: 768px) {
           main > header.draggable { padding-inline-start: 0.5rem; }
         }
-        :root:not([data-quick-chat-hide-top-bar]) [class*="MainContentFrame-"] {
+        :root:not([data-quick-chat-hide-top-bar]) [class*="MainContentFrame-"]:has(.thread-scroll-container) {
+          --app-shell-main-content-frame-top-offset: 0px;
           --thread-floating-content-top-inset: \(Int(topBarHeight))px;
           --thread-content-top-inset: calc(\(Int(topBarHeight))px + 1.5rem);
         }
