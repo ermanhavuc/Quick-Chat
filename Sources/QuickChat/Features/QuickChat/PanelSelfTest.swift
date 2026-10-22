@@ -126,14 +126,24 @@ enum PanelSelfTest {
             let scripts = webView.configuration.userContentController.userScripts.map(\.source)
             let flag = scripts.first { $0.contains("toggleAttribute(\"data-quick-chat-hide-top-bar\"") }
             let saved = defaults.object(forKey: topBarKey) as? Bool ?? true // nothing saved yet: the default
-            check(chat.hidesTopBar == hidden && saved == hidden && scripts.count == 2
+            check(chat.hidesTopBar == hidden && saved == hidden && scripts.count == 3
                   && flag?.hasSuffix(", \(hidden));") == true, name, "\(scripts.count) scripts, flag: \(flag ?? "none")")
         }
         topBar(hidden: true, "hidden by default")
         check(press("\\"), "⌘\\ handled")
         topBar(hidden: false, "⌘\\ → shown (next page loads too)")
+        func firstClick(_ fromTop: CGFloat) -> Bool {
+            let event = NSEvent.mouseEvent(with: .leftMouseDown, location: NSPoint(x: 80, y: frameView.bounds.maxY - fromTop),
+                                           modifierFlags: [], timestamp: 0, windowNumber: panel.windowNumber, context: nil,
+                                           eventNumber: 0, clickCount: 1, pressure: 1)!
+            return webView.acceptsFirstMouse(for: event)
+        }
+        let band = 52 * webView.pageZoom
+        check((webView as? QuickChatWebView)?.firstClickBand == band && firstClick(4) && firstClick(band - 2),
+              "a first click on the shown top bar reaches the page (it drags the panel)", "band \((webView as? QuickChatWebView)?.firstClickBand ?? -1)")
         _ = press("\\")
         topBar(hidden: true, "⌘\\ again → hidden")
+        check((webView as? QuickChatWebView)?.firstClickBand == 0, "… and first clicks there only activate the panel again")
         _ = press("\\", [])
         _ = press("\\", [.command, .option])
         topBar(hidden: true, "plain \\ and ⌥⌘\\ ignored")

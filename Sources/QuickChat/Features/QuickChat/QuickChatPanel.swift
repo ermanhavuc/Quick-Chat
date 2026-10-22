@@ -21,7 +21,7 @@ final class QuickChatController: NSObject {
 
     private let log = Log.make("QuickChat")
     private var panel: QuickChatPanel?
-    private var webView: WKWebView?
+    private var webView: QuickChatWebView?
     /// Open popup windows (see `makePopup`); each one leaves this list when it closes.
     private var popups: [NSWindow] = []
     private var previousApp: NSRunningApplication?
@@ -54,6 +54,7 @@ final class QuickChatController: NSObject {
     private var pageZoom = UserDefaults.standard.object(forKey: pageZoomDefaultsKey) as? CGFloat ?? defaultPageZoom {
         didSet {
             webView?.pageZoom = pageZoom
+            updateFirstClickBand()
             UserDefaults.standard.set(Double(pageZoom), forKey: Self.pageZoomDefaultsKey)
         }
     }
@@ -73,6 +74,7 @@ final class QuickChatController: NSObject {
     private(set) var hidesTopBar = UserDefaults.standard.object(forKey: hidesTopBarDefaultsKey) as? Bool ?? true {
         didSet {
             UserDefaults.standard.set(hidesTopBar, forKey: Self.hidesTopBarDefaultsKey)
+            updateFirstClickBand()
             guard let webView else { return }
             addUserScripts(to: webView.configuration.userContentController) // for the next page loads
             webView.evaluateJavaScript(Self.topBarScript(hidden: hidesTopBar))
@@ -81,6 +83,14 @@ final class QuickChatController: NSObject {
 
     /// ⌘\: shows or hides chatgpt.com's top bar.
     func toggleTopBar() { hidesTopBar.toggle() }
+
+    /// chatgpt.com's top bar height (its --height-toolbar), in CSS pixels.
+    private static let topBarHeight: CGFloat = 52
+
+    /// While the top bar is shown, a first click on its band reaches the page (see `QuickChatWebView`).
+    private func updateFirstClickBand() {
+        webView?.firstClickBand = hidesTopBar ? 0 : Self.topBarHeight * pageZoom
+    }
 
     /// ⌘N / ⇧⌘N: a new temporary chat (chatgpt.com's `?temporary-chat=true`), or a new saved one.
     /// Like chatgpt.com's own New chat, a saved one stays in the current Chat or Work mode; a
@@ -360,14 +370,16 @@ final class QuickChatController: NSObject {
         return webView
     }
 
-    private func makeWebView() -> WKWebView {
+    private func makeWebView() -> QuickChatWebView {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default()
         config.mediaTypesRequiringUserActionForPlayback = []
         addUserScripts(to: config.userContentController)
-        let webView = WKWebView(frame: .zero, configuration: config)
+        config.userContentController.add(self, name: Self.dragMessage)
+        let webView = QuickChatWebView(frame: .zero, configuration: config)
         webView.customUserAgent = Self.safariUserAgent
         webView.pageZoom = pageZoom
+        webView.firstClickBand = hidesTopBar ? 0 : Self.topBarHeight * pageZoom
         webView.uiDelegate = self
         webView.navigationDelegate = self
         webView.allowsBackForwardNavigationGestures = true
@@ -379,7 +391,7 @@ final class QuickChatController: NSObject {
     /// ones, so `hidesTopBar` changes reach the next load.
     private func addUserScripts(to controller: WKUserContentController) {
         controller.removeAllUserScripts()
-        for source in [Self.pageStyleScript, Self.topBarScript(hidden: hidesTopBar)] {
+        for source in [Self.pageStyleScript, Self.topBarScript(hidden: hidesTopBar), Self.dragScript] {
             controller.addUserScript(WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         }
     }
@@ -532,6 +544,29 @@ final class QuickChatController: NSObject {
         #"if (location.hostname === "chatgpt.com") document.documentElement.toggleAttribute("data-quick-chat-hide-top-bar", \#(hidden));"#
     }
 
+    private static let dragMessage = "quickChatDragPanel"
+
+    /// Lets chatgpt.com's top bar move the panel, as a title bar would: a press on its empty parts
+    /// (around and between its buttons) asks the panel to drag (`QuickChatPanel.dragFromPage`).
+    /// The page marks its desktop app's drag areas `.draggable` and their controls `.no-drag`, but
+    /// WebKit has no `app-region`. The bar lets the mouse through to the page under it, so this
+    /// goes by position: inside a rendered `.draggable` and not on a control.
+    private static let dragScript = """
+        if (location.hostname === "chatgpt.com") {
+          addEventListener("mousedown", event => {
+            if (event.button !== 0 || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) return;
+            if (event.target.closest?.('.no-drag, button, a, input, textarea, select, label, [role="button"], [contenteditable="true"]')) return;
+            const onBar = [...document.querySelectorAll(".draggable")].some(bar => {
+              const r = bar.getBoundingClientRect();
+              return event.clientX >= r.left && event.clientX < r.right && event.clientY >= r.top && event.clientY < r.bottom;
+            });
+            if (!onBar) return;
+            event.preventDefault();
+            webkit.messageHandlers.\(dragMessage).postMessage(null);
+          }, true);
+        }
+        """
+
     /// chatgpt.com or a subdomain of it (not e.g. "notchatgpt.com").
     private static func isChatGPTHost(_ host: String) -> Bool {
         let host = host.lowercased()
@@ -584,6 +619,16 @@ extension QuickChatController: NSWindowDelegate {
         guard let popup = notification.object as? NSWindow else { return }
         popup.unbind(.title)
         popups.removeAll { $0 === popup }
+    }
+}
+
+// MARK: - Messages from the page
+
+extension QuickChatController: WKScriptMessageHandler {
+    /// `dragScript`: a press on the panel's top bar, away from its buttons.
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard message.name == Self.dragMessage, message.webView === webView else { return }
+        panel?.dragFromPage()
     }
 }
 
@@ -710,6 +755,25 @@ extension QuickChatController: WKUIDelegate, WKNavigationDelegate, WKDownloadDel
     }
 }
 
+// MARK: - Web view
+
+/// The panel's web view. A first click on an inactive panel normally only activates it; within
+/// `firstClickBand` of the top it reaches the page too, so chatgpt.com's top bar drags the panel
+/// (`QuickChatController.dragScript`) and its buttons work at once, as a window's title bar and
+/// toolbar do.
+final class QuickChatWebView: WKWebView {
+    /// Height in points from the top edge; 0 while the top bar is hidden.
+    var firstClickBand: CGFloat = 0
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        if let event, firstClickBand > 0 {
+            let point = convert(event.locationInWindow, from: nil)
+            if (isFlipped ? point.y : bounds.maxY - point.y) < firstClickBand { return true }
+        }
+        return super.acceptsFirstMouse(for: event)
+    }
+}
+
 // MARK: - Panel
 
 final class QuickChatPanel: NSPanel {
@@ -739,6 +803,8 @@ final class QuickChatPanel: NSPanel {
     var isMaximized: Bool { restoreFrame != nil }
     /// Set while the panel changes its own frame, so only user moves/resizes end the maximize.
     private var isSettingFrame = false
+    /// The last left mouse-down in the panel, for `dragFromPage()`.
+    private var lastMouseDown: NSEvent?
 
     init(contentRect: NSRect) {
         super.init(contentRect: contentRect,
@@ -859,16 +925,26 @@ final class QuickChatPanel: NSPanel {
 
     /// Catches the panel's local shortcuts before the web view sees them. Done here rather
     /// than in `performKeyEquivalent` so combos without ⌘ (e.g. ⌥R, F5) work too.
-    /// With no title bar to drag, ⌃⌘-drag anywhere moves the panel (the gesture macOS's
-    /// NSWindowShouldDragOnGesture setting uses).
+    /// Besides chatgpt.com's top bar (`dragFromPage`), ⌃⌘-drag anywhere moves the panel (the
+    /// gesture macOS's NSWindowShouldDragOnGesture setting uses). Notes the last mouse-down for
+    /// `dragFromPage`.
     override func sendEvent(_ event: NSEvent) {
         if event.type == .keyDown, handleLocalShortcut(event) { return }
+        if event.type == .leftMouseDown { lastMouseDown = event }
         if event.type == .leftMouseDown,
            event.modifierFlags.intersection([.shift, .control, .option, .command]) == [.control, .command] {
             performDrag(with: event)
             return
         }
         super.sendEvent(event)
+    }
+
+    /// Moves the panel with the mouse, as from a title bar, after the page reported a press on
+    /// its top bar (`QuickChatController.dragScript`). The report comes in after the mouse-down,
+    /// so this drags from the last one, and only while the button is still held.
+    func dragFromPage() {
+        guard let event = lastMouseDown, NSEvent.pressedMouseButtons & 1 != 0 else { return }
+        performDrag(with: event)
     }
 
     override func close() { onCancel?() }
