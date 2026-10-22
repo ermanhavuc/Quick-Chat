@@ -543,7 +543,8 @@ final class QuickChatController: NSObject {
     /// ones, so `hidesTopBar` changes reach the next load.
     private func addUserScripts(to controller: WKUserContentController) {
         controller.removeAllUserScripts()
-        for source in [Self.pageStyleScript, Self.topBarScript(hidden: hidesTopBar), Self.dragScript, Self.chatOnlyScript] {
+        for source in [Self.pageStyleScript, Self.topBarScript(hidden: hidesTopBar), Self.dragScript, Self.chatOnlyScript,
+                       Self.shareInMenuScript] {
             controller.addUserScript(WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         }
     }
@@ -677,8 +678,9 @@ final class QuickChatController: NSObject {
 
     /// While `hidesTopBar` is on (the root element has `data-quick-chat-hide-top-bar`), the top
     /// bar is gone: its sidebar button (⇧⌘S does the same), Chat/Work switch, temporary chat
-    /// button (⇧⌘N), and in a chat its New chat, Share and More buttons. The content frame's
-    /// margin that made room for the bar goes too, so a chat scrolls to the panel's top edge.
+    /// button (⇧⌘N), and in a chat its New chat and More buttons (Share is in More's menu,
+    /// `shareInMenuScript`). The content frame's margin that made room for the bar goes too, so
+    /// a chat scrolls to the panel's top edge.
     /// Pages without this bar, like the signed-out page with its Log in button, are unaffected.
     private static let hideTopBarCSS = """
         [data-quick-chat-hide-top-bar] main > header.draggable { display: none; }
@@ -716,9 +718,19 @@ final class QuickChatController: NSObject {
         main > header.draggable [data-app-shell-titlebar-content]:empty { display: none; }
         """
 
+    /// A chat's Share button leaves the top bar for its More menu (`shareInMenuScript`). It's
+    /// hidden only beside a More button, so it can't vanish altogether. Goes by the buttons'
+    /// English labels, as chatgpt.com gives them no other names.
+    private static let shareInMenuCSS = """
+        main > header.draggable:has(button[aria-label="More"])
+          .no-drag:has(> * > button[aria-label="Share"]):not(:has(button:not([aria-label="Share"]))) {
+          display: none;
+        }
+        """
+
     /// The page's touch-ups, with `glassCSS` where the panel is Liquid Glass.
     private static var pageCSS: String {
-        let css = macColorsCSS + pageLayoutCSS + chatOnlyCSS + temporaryChatCSS + chatTitleCSS + hideTopBarCSS
+        let css = macColorsCSS + pageLayoutCSS + chatOnlyCSS + temporaryChatCSS + chatTitleCSS + shareInMenuCSS + hideTopBarCSS
         if #available(macOS 26, *) { return css + glassCSS }
         return css
     }
@@ -819,6 +831,72 @@ final class QuickChatController: NSObject {
               event.stopImmediatePropagation();
             }
           }, true);
+        }
+        """
+
+    /// Puts Share at the top of the top bar's More menu (its button is hidden, `shareInMenuCSS`):
+    /// when that menu opens, a copy of its first item gets the Share button's icon and label, and
+    /// choosing it closes the menu and clicks the hidden button, which does what it always did
+    /// (chatgpt.com at once makes a public link and copies it). The menu's keys don't know the
+    /// added item, so ↑ from the first item and Home go to it, and ↓ and End leave it.
+    private static let shareInMenuScript = """
+        if (location.hostname === "chatgpt.com") {
+          const addShare = menu => {
+            const trigger = document.getElementById(menu.getAttribute("aria-labelledby"));
+            if (!trigger?.matches('main > header.draggable button[aria-label="More"]')) return;
+            const share = trigger.closest("header").querySelector('button[aria-label="Share"]');
+            const first = menu.querySelector(':scope > [role="menuitem"]');
+            if (!share || !first || menu.querySelector(":scope > [data-quick-chat-share]")) return;
+            const item = first.cloneNode(true);
+            for (const name of ["id", "data-radix-collection-item", "data-highlighted", "aria-haspopup", "aria-expanded", "data-state"]) {
+              item.removeAttribute(name);
+            }
+            item.setAttribute("data-quick-chat-share", "");
+            const icon = item.querySelector(".icon-sm");
+            const shareIcon = share.querySelector("svg")?.cloneNode(true);
+            if (icon && shareIcon) {
+              shareIcon.setAttribute("class", "icon-sm shrink-0");
+              icon.replaceWith(shareIcon);
+            }
+            const label = [...item.querySelectorAll("span")].find(span => !span.children.length && span.textContent.trim());
+            if (label) label.textContent = share.textContent.trim() || "Share";
+            const others = () => [...menu.querySelectorAll(':scope > [role="menuitem"]:not([data-quick-chat-share]):not([data-disabled])')];
+            const choose = () => {
+              menu.dispatchEvent(new KeyboardEvent("keydown", {key: "Escape", bubbles: true, cancelable: true}));
+              setTimeout(() => share.click());
+            };
+            item.addEventListener("click", event => {
+              event.preventDefault();
+              event.stopPropagation();
+              choose();
+            });
+            item.addEventListener("pointermove", () => { if (document.activeElement !== item) item.focus(); });
+            item.addEventListener("keydown", event => {
+              const to = event.key === "Enter" || event.key === " " ? "choose"
+                : event.key === "ArrowDown" ? others()[0] : event.key === "End" ? others().at(-1) : null;
+              if (!to) return;
+              event.preventDefault();
+              event.stopPropagation();
+              if (to === "choose") choose(); else to.focus();
+            });
+            menu.addEventListener("keydown", event => {
+              if (event.key === "Home" || (event.key === "ArrowUp" && document.activeElement === others()[0])) {
+                event.preventDefault();
+                event.stopPropagation();
+                item.focus();
+              }
+            }, true);
+            first.before(item);
+          };
+          new MutationObserver(records => {
+            for (const record of records) {
+              for (const node of record.addedNodes) {
+                if (node.nodeType !== Node.ELEMENT_NODE) continue;
+                const menu = node.closest('[role="menu"]') ?? node.querySelector('[role="menu"]');
+                if (menu) addShare(menu);
+              }
+            }
+          }).observe(document, {childList: true, subtree: true});
         }
         """
 

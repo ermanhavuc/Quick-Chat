@@ -138,7 +138,7 @@ enum PanelSelfTest {
             let scripts = webView.configuration.userContentController.userScripts.map(\.source)
             let flag = scripts.first { $0.contains("toggleAttribute(\"data-quick-chat-hide-top-bar\"") }
             let saved = defaults.object(forKey: topBarKey) as? Bool ?? true // nothing saved yet: the default
-            check(chat.hidesTopBar == hidden && saved == hidden && scripts.count == 4
+            check(chat.hidesTopBar == hidden && saved == hidden && scripts.count == 5
                   && flag?.hasSuffix(", \(hidden));") == true, name, "\(scripts.count) scripts, flag: \(flag ?? "none")")
         }
         topBar(hidden: true, "hidden by default")
@@ -299,6 +299,44 @@ enum PanelSelfTest {
         chat.hide(restoreFocus: false)
         spin(until: { false }, seconds: 1.5)
         check(!chat.hasUnseenAnswer, "hidden with nothing answering: no dot")
+
+        print("17. Share moves from the top bar into its More menu")
+        // A stand-in top bar and More menu, so no real chat gets shared (Share makes a public link).
+        _ = evaluate(#"""
+            const main = document.createElement("main");
+            main.id = "quick-chat-self-test-bar";
+            main.innerHTML = '<header class="draggable"><div class="no-drag" id="quick-chat-self-test-more-pill"><div>'
+              + '<button aria-label="More" id="quick-chat-self-test-more">More</button></div></div>'
+              + '<div class="no-drag" id="quick-chat-self-test-share-pill"><div><button aria-label="Share"><svg></svg>Share</button></div></div></header>';
+            document.body.append(main);
+            window.quickChatSelfTestShares = 0;
+            main.querySelector('[aria-label="Share"]').addEventListener("click", () => quickChatSelfTestShares++);
+            const menu = document.createElement("div");
+            menu.id = "quick-chat-self-test-menu";
+            menu.setAttribute("role", "menu");
+            menu.setAttribute("aria-labelledby", "quick-chat-self-test-more");
+            menu.innerHTML = '<div role="menuitem" tabindex="-1" data-radix-collection-item=""><span class="icon-sm"></span><span>Rename</span></div>';
+            document.body.append(menu);
+            true
+            """#)
+        spin(until: { false }, seconds: 0.3)
+        let added = evaluate(#"""
+            const item = document.getElementById("quick-chat-self-test-menu").firstElementChild;
+            const display = id => getComputedStyle(document.getElementById(id)).display;
+            [item.hasAttribute("data-quick-chat-share"), item.textContent.trim(), !!item.querySelector("svg"),
+             item.hasAttribute("data-radix-collection-item"), display("quick-chat-self-test-share-pill") === "none",
+             display("quick-chat-self-test-more-pill") !== "none"].join(" ")
+            """#) as? String
+        check(added == "true Share true false true true", "the menu gets a Share item first, with the button's icon; the button goes",
+              added ?? "nothing")
+        _ = evaluate(#"document.getElementById("quick-chat-self-test-menu").firstElementChild.click(); true"#)
+        spin(until: { false }, seconds: 0.3)
+        check(evaluate("quickChatSelfTestShares") as? Int == 1, "choosing it clicks the Share button once")
+        _ = evaluate(#"""
+            document.getElementById("quick-chat-self-test-bar").remove();
+            document.getElementById("quick-chat-self-test-menu").remove();
+            true
+            """#)
 
         print(failures == 0 ? "panel self-test: ALL PASSED" : "panel self-test: \(failures) FAILED")
         return failures == 0
