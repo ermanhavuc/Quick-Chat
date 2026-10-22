@@ -85,8 +85,8 @@ struct Shortcut: Codable, Equatable {
     private static let reserved: [(keyCode: UInt32, character: String?, modifiers: UInt32, use: String)] = {
         let cmd = UInt32(cmdKey), shift = UInt32(shiftKey), option = UInt32(optionKey)
         let uses: [(Int, String?, UInt32, String)] = [
-            (kVK_ANSI_W, "w", cmd, "Hide"), (kVK_ANSI_N, "n", cmd, "New Temporary Chat"),
-            (kVK_ANSI_N, "n", cmd | shift, "New Saved Chat"), (kVK_ANSI_Minus, "-", cmd, "Zoom Out"),
+            (kVK_ANSI_W, "w", cmd, "Hide"), (kVK_ANSI_N, "n", cmd, "New Chat"),
+            (kVK_ANSI_N, "n", cmd | shift, "New Temporary Chat"), (kVK_ANSI_Minus, "-", cmd, "Zoom Out"),
             (kVK_ANSI_Equal, "=", cmd, "Zoom In"), (kVK_ANSI_Equal, "+", cmd | shift, "Zoom In"),
             (kVK_ANSI_0, "0", cmd, "Actual Size"), (kVK_ANSI_LeftBracket, "[", cmd, "Less Thinking"),
             (kVK_ANSI_RightBracket, "]", cmd, "More Thinking"), (kVK_ANSI_Backslash, "\\", cmd, "Show or Hide the Top Bar"),
