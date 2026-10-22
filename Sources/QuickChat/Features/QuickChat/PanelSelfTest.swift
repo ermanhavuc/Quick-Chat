@@ -260,7 +260,7 @@ enum PanelSelfTest {
         print("15. on chatgpt.com: chats are Chat and a temporary one is marked")
         spin(until: { !webView.isLoading && evaluate("document.readyState") as? String == "complete" }, seconds: 20)
         check(evaluate(#"document.documentElement.hasAttribute("data-quick-chat-temporary")"#) as? Bool == true,
-              "the temporary chat is marked (dashed message box)")
+              "the temporary chat is marked (its message box says so)")
         check((evaluate("document.cookie") as? String)?.contains("codex_composer_mode=chat") == true, "Chat mode, not Work")
 
         print("16. an answer that finishes while the panel is hidden puts a dot on the menu-bar icon")

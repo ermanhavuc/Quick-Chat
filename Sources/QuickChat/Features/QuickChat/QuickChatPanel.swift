@@ -687,15 +687,11 @@ final class QuickChatController: NSObject {
         }
         """
 
-    /// A temporary chat (`chatOnlyScript` marks the root `data-quick-chat-temporary`) shows it in
-    /// the message box, also while the top bar with chatgpt.com's own Temporary button is
-    /// hidden: a dashed outline, like the dashed bubbles of your messages there, and the
-    /// placeholder reads "Ask ChatGPT · temporary chat". A saved chat's box stays as it is.
+    /// A temporary chat (`chatOnlyScript` marks the root `data-quick-chat-temporary`) says so in
+    /// the empty message box, also while the top bar with chatgpt.com's own Temporary button is
+    /// hidden: the placeholder reads "Ask ChatGPT · temporary chat". A saved chat's box stays as
+    /// it is.
     private static let temporaryChatCSS = """
-        [data-quick-chat-temporary] form [class*="ComposerLayoutRoot-"] {
-          outline: 1px dashed color-mix(in srgb, currentColor 40%, transparent);
-          outline-offset: -1px;
-        }
         [data-quick-chat-temporary] form .ProseMirror p.placeholder[data-placeholder]::before {
           content: attr(data-placeholder) " · temporary chat";
         }
