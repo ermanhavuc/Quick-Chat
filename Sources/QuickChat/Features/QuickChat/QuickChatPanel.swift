@@ -34,7 +34,7 @@ final class QuickChatController: NSObject {
 
     var isVisible: Bool { panel?.isVisible == true }
 
-    /// Local shortcut (only while the panel is key) that triggers `resetSize()`.
+    /// Local shortcut (only while the panel is key) that triggers `resetPosition()`.
     var resetSizeShortcut = Shortcut.loadResetSize() {
         didSet { panel?.resetSizeShortcut = resetSizeShortcut }
     }
@@ -46,7 +46,7 @@ final class QuickChatController: NSObject {
 
     /// Puts the panel back to its default size at the bottom center of its screen (no-op if it
     /// was never built).
-    func resetSize() { panel?.resetSize() }
+    func resetPosition() { panel?.resetPosition() }
 
     static let pageZoomDefaultsKey = "quickChat.pageZoom"
     /// Below 100% so text is smaller than chatgpt.com's own; ⌘0 comes back here.
@@ -481,7 +481,7 @@ final class QuickChatController: NSObject {
             // First open: the bottom center of the screen with the mouse.
             let mouse = NSEvent.mouseLocation
             if let screen = NSScreen.screens.first(where: { $0.frame.contains(mouse) }) ?? NSScreen.main {
-                panel.setFrame(panel.defaultFrame(on: screen), display: false)
+                panel.setFrame(panel.bottomCenterFrame(on: screen), display: false)
             }
         }
         panel.setFrameAutosaveName(QuickChatPanel.autosaveName)
@@ -1243,7 +1243,7 @@ private final class ToastView: NSView {
 
 final class QuickChatPanel: NSPanel {
     static let autosaveName = "MiniChat.Panel" // pre-rename name; keeps the saved frame
-    /// Default content size (also the "reset size" target): a 3:4 portrait panel. Anything under
+    /// Default content size (the first open's): a 3:4 portrait panel. Anything under
     /// 640 wide gets chatgpt.com's compact (mobile) layout; 420 sits between Classic's 440-wide
     /// companion chat and `minSize` (400), so the thread reads as a narrow column without the
     /// squat look of the new app's 470-wide window cut down to 560 tall.
@@ -1261,7 +1261,7 @@ final class QuickChatPanel: NSPanel {
     var onFind: ((NSTextFinder.Action) -> Void)?
     /// ⇧⌘B: open the chat in the default browser.
     var onOpenInBrowser: (() -> Void)?
-    /// Local key combo that calls `resetSize()` while the panel is key (default ⌘O).
+    /// Local key combo that calls `resetPosition()` while the panel is key (default ⌘O).
     var resetSizeShortcut: Shortcut? = .commandO
     /// Local key combo that calls `toggleMaximize()` while the panel is key (default ⌘F).
     var maximizeShortcut: Shortcut? = .commandF
@@ -1342,22 +1342,23 @@ final class QuickChatPanel: NSPanel {
     /// Gap between the panel and the bottom of the screen's visible area (the Dock, if it's there).
     static let bottomMargin: CGFloat = 16
 
-    /// `defaultSize` at the bottom center of `screen`'s visible area: where the panel first
-    /// opens, and where `resetSize()` puts it back.
-    func defaultFrame(on screen: NSScreen) -> NSRect {
+    /// `size` (by default `defaultSize`) at the bottom center of `screen`'s visible area: where the panel first
+    /// opens, and, at the panel's own size, where `resetPosition()` puts it back. Kept within
+    /// the visible area.
+    func bottomCenterFrame(on screen: NSScreen, size: NSSize? = nil) -> NSRect {
         let visible = screen.visibleFrame
-        var size = frameRect(forContentRect: NSRect(origin: .zero, size: Self.defaultSize)).size
+        var size = size ?? frameRect(forContentRect: NSRect(origin: .zero, size: Self.defaultSize)).size
         size.width = min(size.width, visible.width)
         size.height = min(size.height, visible.height - Self.bottomMargin)
         return NSRect(x: visible.midX - size.width / 2, y: visible.minY + Self.bottomMargin,
                       width: size.width, height: size.height)
     }
 
-    /// Back to `defaultFrame` on the panel's screen (size and position), also from maximized.
-    /// The frame autosave then persists it.
-    func resetSize() {
+    /// Back to the bottom center of the panel's screen, keeping its size; from maximized, the
+    /// size it had before. The frame autosave then persists it.
+    func resetPosition() {
         guard let screen = screen ?? NSScreen.main else { return }
-        setOwnFrame(defaultFrame(on: screen))
+        setOwnFrame(bottomCenterFrame(on: screen, size: (restoreFrame ?? frame).size))
         if isMaximized { endMaximize() }
     }
 
@@ -1380,11 +1381,11 @@ final class QuickChatPanel: NSPanel {
         if isMaximized, !isSettingFrame { endMaximize() }
     }
 
-    /// Runs the Reset Size & Position or Maximize action if `event` is its shortcut.
+    /// Runs the Reset Position or Maximize action if `event` is its shortcut.
     private func handleLocalShortcut(_ event: NSEvent) -> Bool {
         guard let pressed = Shortcut(event: event) else { return false }
         if pressed == resetSizeShortcut {
-            resetSize()
+            resetPosition()
         } else if pressed == maximizeShortcut {
             toggleMaximize()
         } else {

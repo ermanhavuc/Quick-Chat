@@ -103,20 +103,20 @@ enum PanelSelfTest {
         _ = press("n", [.command, .option])
         check(newChats == [true, false], "⌘N → temporary, ⇧⌘N → saved; plain n and ⌥⌘N ignored", "\(newChats)")
 
-        print("6. opens at the bottom center of the screen; ⌘O goes back there")
-        func atBottomCenter(_ name: String) {
+        print("6. opens at the bottom center of the screen; ⌘O moves it back there, keeping its size")
+        func atBottomCenter(_ size: NSSize, _ name: String) {
             guard let visible = panel.screen?.visibleFrame else { return check(false, name, "no screen") }
             let f = panel.frame
             check(abs(f.midX - visible.midX) < 1 && abs(f.minY - (visible.minY + QuickChatPanel.bottomMargin)) < 1
-                  && f.size == QuickChatPanel.defaultSize, name, "\(f) in \(visible)")
+                  && f.size == size, name, "\(f) in \(visible)")
         }
-        atBottomCenter("first open: 420×560, centered, 16 pt above the Dock")
+        atBottomCenter(QuickChatPanel.defaultSize, "first open: 420×560, centered, 16 pt above the Dock")
         panel.setFrame(NSRect(x: 100, y: 300, width: 600, height: 700), display: false)
         check(press("o", keyCode: 31), "⌘O handled") // kVK_ANSI_O
-        atBottomCenter("⌘O after moving and resizing")
+        atBottomCenter(NSSize(width: 600, height: 700), "⌘O after moving and resizing: back at the bottom center, still 600×700")
         panel.toggleMaximize()
         _ = press("o", keyCode: 31)
-        atBottomCenter("⌘O while maximized")
+        atBottomCenter(NSSize(width: 600, height: 700), "⌘O while maximized: the size from before, at the bottom center")
         check(!panel.isMaximized, "… and no longer maximized")
 
         print("7. links open in the default browser, except chatgpt.com's chats and sign-in pages")

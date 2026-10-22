@@ -38,7 +38,7 @@ Two features, both off until you turn them on from the menu-bar icon. Your choic
 ### Quick Chat
 
 - A global shortcut (⌥Space by default; change it with **Change Shortcut…**) toggles a floating panel with chatgpt.com inside.
-- The panel opens at the bottom center of the screen, just above the Dock, at 420×560, so chatgpt.com uses its compact layout. It is resizable and movable; the size and position are remembered. It has no title bar, so chatgpt.com fills it to the top edge; to move it, drag the top bar's empty parts (around its buttons, when it's shown with ⌘\), or ⌃⌘-drag anywhere in it. ⌘F maximizes the panel to fill the screen, leaving the menu bar and Dock visible, and restores your size on a second press. ⌘O puts it back at the bottom center at the default size.
+- The panel opens at the bottom center of the screen, just above the Dock, at 420×560, so chatgpt.com uses its compact layout. It is resizable and movable; the size and position are remembered. It has no title bar, so chatgpt.com fills it to the top edge; to move it, drag the top bar's empty parts (around its buttons, when it's shown with ⌘\), or ⌃⌘-drag anywhere in it. ⌘F maximizes the panel to fill the screen, leaving the menu bar and Dock visible, and restores your size on a second press. ⌘O moves it back to the bottom center, keeping its size.
 - The page is zoomed to 90% by default, so text is a little smaller than on chatgpt.com. ⌘− and ⌘= (or ⌘+) zoom out and in, ⌘0 goes back to 90%, and your zoom is remembered. A short message at the top of the panel shows the new zoom (or that it's at 50% or 200% already).
 - The panel is just for chats: new, temporary and saved ones, always in Chat mode, never Work. chatgpt.com's sidebar (and its button and ⇧⌘S), the maximized layout's side panel and the Chat/Work switch are gone, and its other pages (GPTs, Library, Codex, projects, help) open in your default browser, also when the page itself moves there (or a chat pop-up does); Back and Forward skip them.
 - chatgpt.com's top bar (temporary chat, and in a chat New chat, More and Share) is hidden, so the chat fills the panel. ⌘\ shows or hides it, and your choice is remembered. Its main actions have keys anyway: ⌘N and ⇧⌘N for new temporary and saved chats.
@@ -67,7 +67,7 @@ chatgpt.com has built-in keyboard shortcuts, and they all reach the panel. Toget
 | ⇧⌘⌫ | Delete chat |
 | ⌘/ | Show all shortcuts (and change them) |
 
-These come from chatgpt.com's own **Keyboard shortcuts** dialog (⌘/), as of October 2026. Quick Chat only reserves Esc and ⌘W (hide the panel), ⌘N and ⇧⌘N (new temporary chat, new saved chat), ⌘O (reset the panel's size and position), ⌘F (maximize or restore the panel), ⌘−, ⌘=, ⌘0 (zoom), ⌘[, ⌘] (thinking effort), ⌘\ (top bar), ⇧⌘F, ⌘G, ⇧⌘G (find) and ⇧⌘B (open in browser), and turns off ⇧⌘S, as there's no sidebar. **Change Shortcut…** won't take any of these fixed keys, the editing keys (⌘C, ⌘V and so on) or chatgpt.com's own shortcuts above.
+These come from chatgpt.com's own **Keyboard shortcuts** dialog (⌘/), as of October 2026. Quick Chat only reserves Esc and ⌘W (hide the panel), ⌘N and ⇧⌘N (new temporary chat, new saved chat), ⌘O (move the panel back to the bottom center), ⌘F (maximize or restore the panel), ⌘−, ⌘=, ⌘0 (zoom), ⌘[, ⌘] (thinking effort), ⌘\ (top bar), ⇧⌘F, ⌘G, ⇧⌘G (find) and ⇧⌘B (open in browser), and turns off ⇧⌘S, as there's no sidebar. **Change Shortcut…** won't take any of these fixed keys, the editing keys (⌘C, ⌘V and so on) or chatgpt.com's own shortcuts above.
 
 ### Disable Show Mini Shortcut
 

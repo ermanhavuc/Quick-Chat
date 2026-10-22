@@ -1,7 +1,7 @@
 import AppKit
 
 /// Small window for choosing Quick Chat's shortcuts: the global toggle, Ask About Selection and
-/// Ask About Clipboard, and the local (panel-focused) Reset Size & Position and Maximize. The
+/// Ask About Clipboard, and the local (panel-focused) Reset Position and Maximize. The
 /// caller unregisters its global hotkeys while this is open (otherwise the current shortcuts
 /// would be swallowed).
 @MainActor
@@ -87,7 +87,7 @@ final class ShortcutRecorderWindow: NSObject, NSWindowDelegate {
         }
         let names: [(RecorderField, String)] = [
             (recorder, "the Quick Chat shortcut"), (askRecorder, "Ask About Selection"),
-            (clipboardRecorder, "Ask About Clipboard"), (resetSizeRecorder, "Reset Size & Position"),
+            (clipboardRecorder, "Ask About Clipboard"), (resetSizeRecorder, "Reset Position"),
             (maximizeRecorder, "Maximize"),
         ]
         guard let name = names.first(where: { $0.0 !== field && $0.0.shortcut == new })?.1 else { return nil }
@@ -111,7 +111,7 @@ final class ShortcutRecorderWindow: NSObject, NSWindowDelegate {
         let clipboardLabel = Self.sectionLabel("Ask About Clipboard", detail: "Opens a new chat with the copied text.")
         let clipboardReset = NSButton(title: "Reset to ⌥⇧V", target: self, action: #selector(resetClipboardToDefault))
         let clipboardRow = NSStackView(views: [clipboardRecorder, clipboardReset])
-        let resetSizeLabel = Self.sectionLabel("Reset Size & Position",
+        let resetSizeLabel = Self.sectionLabel("Reset Position",
                                                detail: "Works only while Quick Chat is focused.")
         let resetSizeReset = NSButton(title: "Reset to ⌘O", target: self, action: #selector(resetResetSizeToDefault))
         let resetSizeRow = NSStackView(views: [resetSizeRecorder, resetSizeReset])

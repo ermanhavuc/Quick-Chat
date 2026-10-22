@@ -55,8 +55,9 @@ final class QuickChatFeature: Feature {
         log.info("Disabled")
     }
 
-    /// Puts the Quick Chat panel back to its default size and spot (same as the Reset Size & Position shortcut).
-    func resetSize() { chat.resetSize() }
+    /// Puts the Quick Chat panel back at the bottom center, keeping its size (same as the Reset
+    /// Position shortcut).
+    func resetPosition() { chat.resetPosition() }
 
     /// Registers the Quick Chat shortcut (throws if it can't) and the Ask shortcuts. If only an
     /// Ask one fails (another app has it), Quick Chat still works and the menu says so, so
@@ -74,7 +75,7 @@ final class QuickChatFeature: Feature {
     private func registerAsk(_ name: String, _ shortcut: Shortcut, _ handler: @escaping @MainActor () -> Void) -> GlobalHotKey? {
         let others: [(String, Shortcut)] = [("Quick Chat", self.shortcut), ("Ask About Selection", askShortcut),
                                             ("Ask About Clipboard", clipboardShortcut),
-                                            ("Reset Size & Position", chat.resetSizeShortcut), ("Maximize", chat.maximizeShortcut)]
+                                            ("Reset Position", chat.resetSizeShortcut), ("Maximize", chat.maximizeShortcut)]
         do {
             if let other = others.first(where: { $0.0 != name && $0.1 == shortcut })?.0 {
                 throw FeatureError("\(shortcut.displayString) is already \(other).",
