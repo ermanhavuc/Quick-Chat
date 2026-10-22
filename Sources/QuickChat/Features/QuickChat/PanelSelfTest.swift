@@ -150,7 +150,7 @@ enum PanelSelfTest {
                                            eventNumber: 0, clickCount: 1, pressure: 1)!
             return webView.acceptsFirstMouse(for: event)
         }
-        let band = 52 * webView.pageZoom
+        let band = QuickChatController.topBarHeight * webView.pageZoom
         check((webView as? QuickChatWebView)?.firstClickBand == band && firstClick(4) && firstClick(band - 2),
               "a first click on the shown top bar reaches the page (it drags the panel)", "band \((webView as? QuickChatWebView)?.firstClickBand ?? -1)")
         _ = press("\\")
@@ -270,12 +270,14 @@ enum PanelSelfTest {
               const bar = [...document.querySelectorAll("main > header.draggable")].find(shown);
               const button = bar && [...bar.querySelectorAll("button")].filter(shown).at(-1);
               const box = [...document.querySelectorAll('form [class*="ComposerLayoutRoot-"]')].filter(shown).pop();
-              const gap = button && box ? Math.abs(box.getBoundingClientRect().right - button.getBoundingClientRect().right).toFixed(1) : "no bar";
+              const [b, m] = [button?.getBoundingClientRect(), box?.getBoundingClientRect()];
+              const gap = b && m ? [m.right - b.right, b.top - (innerHeight - m.bottom)].map(d => Math.abs(d).toFixed(0)).join(" ") : "no bar";
               root.toggleAttribute("data-quick-chat-hide-top-bar", hidden);
               return gap;
             })()
             """#) as? String
-        check(barEdges == "0.0", "the top bar's buttons line up with the message box's sides", "\(barEdges ?? "nothing") px apart")
+        check(barEdges == "0 0", "the top bar's buttons sit as far from the panel's top and side as the message box from its bottom and side",
+              "\(barEdges ?? "nothing") px off (side, top)")
         let titleInBar = #"getComputedStyle(document.documentElement).getPropertyValue("--quick-chat-title")"#
         check(evaluate(titleInBar) as? String == "", "no title in the top bar on the new-chat page")
         _ = evaluate(#"""
