@@ -257,11 +257,24 @@ enum PanelSelfTest {
             check(Shortcut.reservedUse(of: shortcut) == nil, "\(shortcut.displayString) (a default) is free")
         }
 
-        print("15. on chatgpt.com: chats are Chat and a temporary one is marked")
+        print("15. on chatgpt.com: chats are Chat, a temporary one is marked, a chat's title is in the top bar")
         spin(until: { !webView.isLoading && evaluate("document.readyState") as? String == "complete" }, seconds: 20)
         check(evaluate(#"document.documentElement.hasAttribute("data-quick-chat-temporary")"#) as? Bool == true,
               "the temporary chat is marked (its message box says so)")
         check((evaluate("document.cookie") as? String)?.contains("codex_composer_mode=chat") == true, "Chat mode, not Work")
+        let titleInBar = #"getComputedStyle(document.documentElement).getPropertyValue("--quick-chat-title")"#
+        check(evaluate(titleInBar) as? String == "", "no title in the top bar on the new-chat page")
+        _ = evaluate(#"""
+            window.quickChatSelfTest = [location.href, document.title];
+            history.replaceState(history.state, "", "/c/quick-chat-self-test");
+            document.title = 'A "quoted" \\ title';
+            """#)
+        spin(until: { false }, seconds: 0.3)
+        let shownTitle = evaluate(titleInBar) as? String ?? ""
+        check(shownTitle.contains("quoted") && shownTitle.hasSuffix(#"title""#), "a chat's title goes in the top bar", shownTitle)
+        _ = evaluate(#"history.replaceState(history.state, "", quickChatSelfTest[0]); document.title = quickChatSelfTest[1];"#)
+        spin(until: { false }, seconds: 0.3)
+        check(evaluate(titleInBar) as? String == "", "back on the new-chat page: no title")
 
         print("16. an answer that finishes while the panel is hidden puts a dot on the menu-bar icon")
         let observer = NotificationCenter.default.addObserver(forName: QuickChatController.unseenAnswerDidChange, object: chat,

@@ -697,9 +697,28 @@ final class QuickChatController: NSObject {
         }
         """
 
+    /// With the top bar shown, a chat's title (`--quick-chat-title`, set by `chatOnlyScript`)
+    /// sits centered between its buttons, cut short with "…" when it doesn't fit, as in a
+    /// window's title bar. Pressing it drags the panel, as around it. The bar's slot for page
+    /// content takes half the room in a temporary chat though it's empty, so an empty one goes.
+    private static let chatTitleCSS = """
+        main > header.draggable > [class*="group/titlebar"]::before {
+          content: var(--quick-chat-title, none);
+          flex: 1 1 0;
+          min-width: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          text-align: center;
+          font-size: 14px;
+          font-weight: 600;
+        }
+        main > header.draggable [data-app-shell-titlebar-content]:empty { display: none; }
+        """
+
     /// The page's touch-ups, with `glassCSS` where the panel is Liquid Glass.
     private static var pageCSS: String {
-        let css = macColorsCSS + pageLayoutCSS + chatOnlyCSS + temporaryChatCSS + hideTopBarCSS
+        let css = macColorsCSS + pageLayoutCSS + chatOnlyCSS + temporaryChatCSS + chatTitleCSS + hideTopBarCSS
         if #available(macOS 26, *) { return css + glassCSS }
         return css
     }
@@ -728,13 +747,33 @@ final class QuickChatController: NSObject {
     /// back; Back/Forward skip such pages. ⇧⌘S (chatgpt.com's sidebar key) does nothing, as the
     /// sidebar is gone (`chatOnlyCSS`). Chats are always Chat, never Work: the Chat/Work switch is
     /// gone too, so its cookie is set to Chat before the page reads it. Marks the root
-    /// `data-quick-chat-temporary` in a temporary chat (`temporaryChatCSS`).
+    /// `data-quick-chat-temporary` in a temporary chat (`temporaryChatCSS`), and puts a chat's
+    /// title in `--quick-chat-title` for the top bar (`chatTitleCSS`), in a style sheet of its
+    /// own: chatgpt.com names the page after the chat (a temporary one after its first message),
+    /// and every other page "ChatGPT".
     private static let chatOnlyScript = """
         if (location.hostname === "chatgpt.com") {
           document.cookie = "codex_composer_mode=chat; path=/; max-age=31536000; secure; samesite=lax";
-          const markTemporary = () => document.documentElement.toggleAttribute("data-quick-chat-temporary",
-            new URLSearchParams(location.search).get("temporary-chat") === "true");
-          markTemporary();
+          const titleSheet = new CSSStyleSheet();
+          document.adoptedStyleSheets = [...document.adoptedStyleSheets, titleSheet];
+          let shownTitle = "";
+          const markTitle = () => {
+            const title = location.pathname.startsWith("/c/") ? document.title.trim() : "";
+            const shown = title === "ChatGPT" ? "" : title;
+            if (shown === shownTitle) return;
+            shownTitle = shown;
+            titleSheet.replaceSync(shown ? `:root { --quick-chat-title: "${CSS.escape(shown)}"; }` : "");
+          };
+          addEventListener("DOMContentLoaded", () => {
+            markTitle();
+            new MutationObserver(markTitle).observe(document.head, {childList: true, subtree: true, characterData: true});
+          });
+          const markPage = () => {
+            document.documentElement.toggleAttribute("data-quick-chat-temporary",
+              new URLSearchParams(location.search).get("temporary-chat") === "true");
+            markTitle();
+          };
+          markPage();
           const isChatPath = path => path === "/" || path.startsWith("/c/") || path.startsWith("/auth/");
           const outside = href => {
             const url = new URL(href, location.href);
@@ -764,7 +803,7 @@ final class QuickChatController: NSObject {
                   dispatchEvent(new PopStateEvent("popstate", {state: fromState}));
                 }
               }
-              markTemporary();
+              markPage();
             };
           }
           addEventListener("popstate", event => {
@@ -772,7 +811,7 @@ final class QuickChatController: NSObject {
               event.stopImmediatePropagation();
               history.back();
             }
-            markTemporary();
+            markPage();
           }, true);
           addEventListener("keydown", event => {
             if (event.metaKey && event.shiftKey && !event.altKey && !event.ctrlKey && event.key.toLowerCase() === "s") {
