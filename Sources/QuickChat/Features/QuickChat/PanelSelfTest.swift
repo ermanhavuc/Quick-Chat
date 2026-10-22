@@ -257,10 +257,8 @@ enum PanelSelfTest {
             check(Shortcut.reservedUse(of: shortcut) == nil, "\(shortcut.displayString) (a default) is free")
         }
 
-        print("15. on chatgpt.com: chats are Chat, a temporary one is marked, a chat's title is in the top bar")
+        print("15. on chatgpt.com: chats are Chat, a chat's title is in the top bar")
         spin(until: { !webView.isLoading && evaluate("document.readyState") as? String == "complete" }, seconds: 20)
-        check(evaluate(#"document.documentElement.hasAttribute("data-quick-chat-temporary")"#) as? Bool == true,
-              "the temporary chat is marked (its message box says so)")
         check((evaluate("document.cookie") as? String)?.contains("codex_composer_mode=chat") == true, "Chat mode, not Work")
         panel.setContentSize(QuickChatPanel.defaultSize) // the narrow layout (section 6 left it at 600 pt)
         spin(until: { false }, seconds: 0.5)

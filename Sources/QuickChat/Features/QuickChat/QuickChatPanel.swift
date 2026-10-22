@@ -694,16 +694,6 @@ final class QuickChatController: NSObject {
         }
         """
 
-    /// A temporary chat (`chatOnlyScript` marks the root `data-quick-chat-temporary`) says so in
-    /// the empty message box, also while the top bar with chatgpt.com's own Temporary button is
-    /// hidden: the placeholder reads "Ask ChatGPT · temporary chat". A saved chat's box stays as
-    /// it is.
-    private static let temporaryChatCSS = """
-        [data-quick-chat-temporary] form .ProseMirror p.placeholder[data-placeholder]::before {
-          content: attr(data-placeholder) " · temporary chat";
-        }
-        """
-
     /// With the top bar shown, a chat's title (`--quick-chat-title`, set by `chatOnlyScript`)
     /// sits centered between its buttons, cut short with "…" when it doesn't fit, as in a
     /// window's title bar. Pressing it drags the panel, as around it. The bar's slot for page
@@ -735,7 +725,7 @@ final class QuickChatController: NSObject {
 
     /// The page's touch-ups, with `glassCSS` where the panel is Liquid Glass.
     private static var pageCSS: String {
-        let css = macColorsCSS + pageLayoutCSS + chatOnlyCSS + temporaryChatCSS + chatTitleCSS + shareInMenuCSS + hideTopBarCSS
+        let css = macColorsCSS + pageLayoutCSS + chatOnlyCSS + chatTitleCSS + shareInMenuCSS + hideTopBarCSS
         if #available(macOS 26, *) { return css + glassCSS }
         return css
     }
@@ -763,11 +753,10 @@ final class QuickChatController: NSObject {
     /// load the app would see), opens it in the default browser instead, and the panel goes
     /// back; Back/Forward skip such pages. ⇧⌘S (chatgpt.com's sidebar key) does nothing, as the
     /// sidebar is gone (`chatOnlyCSS`). Chats are always Chat, never Work: the Chat/Work switch is
-    /// gone too, so its cookie is set to Chat before the page reads it. Marks the root
-    /// `data-quick-chat-temporary` in a temporary chat (`temporaryChatCSS`), and puts a chat's
-    /// title in `--quick-chat-title` for the top bar (`chatTitleCSS`), in a style sheet of its
-    /// own: chatgpt.com names the page after the chat (a temporary one after its first message),
-    /// and every other page "ChatGPT".
+    /// gone too, so its cookie is set to Chat before the page reads it. Puts a chat's title in
+    /// `--quick-chat-title` for the top bar (`chatTitleCSS`), in a style sheet of its own:
+    /// chatgpt.com names the page after the chat (a temporary one after its first message), and
+    /// every other page "ChatGPT".
     private static let chatOnlyScript = """
         if (location.hostname === "chatgpt.com") {
           document.cookie = "codex_composer_mode=chat; path=/; max-age=31536000; secure; samesite=lax";
@@ -785,12 +774,6 @@ final class QuickChatController: NSObject {
             markTitle();
             new MutationObserver(markTitle).observe(document.head, {childList: true, subtree: true, characterData: true});
           });
-          const markPage = () => {
-            document.documentElement.toggleAttribute("data-quick-chat-temporary",
-              new URLSearchParams(location.search).get("temporary-chat") === "true");
-            markTitle();
-          };
-          markPage();
           const isChatPath = path => path === "/" || path.startsWith("/c/") || path.startsWith("/auth/");
           const outside = href => {
             const url = new URL(href, location.href);
@@ -820,7 +803,7 @@ final class QuickChatController: NSObject {
                   dispatchEvent(new PopStateEvent("popstate", {state: fromState}));
                 }
               }
-              markPage();
+              markTitle();
             };
           }
           addEventListener("popstate", event => {
@@ -828,7 +811,7 @@ final class QuickChatController: NSObject {
               event.stopImmediatePropagation();
               history.back();
             }
-            markPage();
+            markTitle();
           }, true);
           addEventListener("keydown", event => {
             if (event.metaKey && event.shiftKey && !event.altKey && !event.ctrlKey && event.key.toLowerCase() === "s") {
