@@ -83,7 +83,7 @@ struct Shortcut: Codable, Equatable {
     }
 
     private static let reserved: [(keyCode: UInt32, character: String?, modifiers: UInt32, use: String)] = {
-        let cmd = UInt32(cmdKey), shift = UInt32(shiftKey), option = UInt32(optionKey)
+        let cmd = UInt32(cmdKey), shift = UInt32(shiftKey), option = UInt32(optionKey), control = UInt32(controlKey)
         let uses: [(Int, String?, UInt32, String)] = [
             (kVK_ANSI_W, "w", cmd, "Hide"), (kVK_ANSI_N, "n", cmd, "New Chat"),
             (kVK_ANSI_N, "n", cmd | shift, "New Temporary Chat"), (kVK_ANSI_Minus, "-", cmd, "Zoom Out"),
@@ -92,7 +92,7 @@ struct Shortcut: Codable, Equatable {
             (kVK_ANSI_RightBracket, "]", cmd, "More Thinking"),
             (kVK_ANSI_F, "f", cmd | shift, "Find"), (kVK_ANSI_G, "g", cmd, "Find Next"),
             (kVK_ANSI_G, "g", cmd | shift, "Find Previous"), (kVK_ANSI_B, "b", cmd | shift, "Open Chat in Browser"),
-            (kVK_ANSI_R, "r", cmd, "Reload"),
+            (kVK_ANSI_R, "r", cmd, "Reload"), (kVK_ANSI_C, "c", control, "Clear Message"),
             (kVK_ANSI_Z, "z", cmd, "Undo"), (kVK_ANSI_Z, "z", cmd | shift, "Redo"), (kVK_ANSI_X, "x", cmd, "Cut"),
             (kVK_ANSI_C, "c", cmd, "Copy"), (kVK_ANSI_V, "v", cmd, "Paste"),
             (kVK_ANSI_V, "v", cmd | option | shift, "Paste and Match Style"), (kVK_ANSI_A, "a", cmd, "Select All"),

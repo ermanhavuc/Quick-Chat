@@ -143,6 +143,16 @@ final class QuickChatController: NSObject {
                   })
     }
 
+    /// ⌃C: empties the message box, as ⌃C drops the line you're typing in a terminal
+    /// (`clearMessageBoxScript`).
+    func clearMessageBox() {
+        webView?.callAsyncJavaScript(PageScripts.clearMessageBoxScript, arguments: [:], in: nil, in: .page) { [weak self] result in
+            guard case .failure(let error) = result else { return }
+            let message = (error as NSError).userInfo["WKJavaScriptExceptionMessage"] as? String
+            self?.log.error("Clear message: \(message ?? error.localizedDescription, privacy: .public)")
+        }
+    }
+
     /// Set while `stepEffort` runs, so a held ⌘] can't open and close the picker over itself.
     private var isSteppingEffort = false
 
@@ -372,6 +382,7 @@ final class QuickChatController: NSObject {
         panel.onFind = { [weak self] in self?.find($0) }
         panel.onOpenInBrowser = { [weak self] in self?.openChatInBrowser() }
         panel.onReload = { [weak self] in self?.reload() }
+        panel.onClearMessage = { [weak self] in self?.clearMessageBox() }
         panel.resetSizeShortcut = resetSizeShortcut
 
         let webView = makeWebView()

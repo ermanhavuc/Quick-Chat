@@ -100,6 +100,25 @@ enum PanelSelfTest {
         _ = press("r", [.command, .shift])
         check(reloads == 1, "⇧⌘R doesn't")
         panel.onReload = reload
+        var clears = 0
+        let clear = panel.onClearMessage
+        panel.onClearMessage = { clears += 1 }
+        func sendC(_ flags: NSEvent.ModifierFlags) { // through sendEvent, where the panel catches ⌃C
+            panel.sendEvent(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0,
+                                             windowNumber: panel.windowNumber, context: nil, characters: "c",
+                                             charactersIgnoringModifiers: "c", isARepeat: false, keyCode: UInt16(kVK_ANSI_C))!)
+        }
+        panel.makeFirstResponder(webView)
+        sendC(.control)
+        check(clears == 1, "⌃C in the page clears the message box")
+        sendC([.control, .shift])
+        sendC([.control, .option])
+        check(clears == 1, "⌃⇧C and ⌃⌥C don't")
+        panel.makeFirstResponder(nil)
+        sendC(.control)
+        check(clears == 1, "⌃C with focus outside the page (the find bar, say) doesn't")
+        panel.makeFirstResponder(webView)
+        panel.onClearMessage = clear
 
         print("5. starts on a new saved chat; ⌘N / ⇧⌘N start a new saved / temporary chat")
         let start = webView.url?.absoluteString ?? "none"
@@ -245,7 +264,8 @@ enum PanelSelfTest {
 
         print("14. no shortcut can take the panel's or chatgpt.com's keys")
         for (combo, carbon, key) in [("⌘V", cmdKey, kVK_ANSI_V), ("⌘K", cmdKey, kVK_ANSI_K), ("⇧⌘F", cmdKey | shiftKey, kVK_ANSI_F),
-                                     ("⌘W", cmdKey, kVK_ANSI_W), ("⌘↩", cmdKey, kVK_Return), ("⌘R", cmdKey, kVK_ANSI_R)] {
+                                     ("⌘W", cmdKey, kVK_ANSI_W), ("⌘↩", cmdKey, kVK_Return), ("⌘R", cmdKey, kVK_ANSI_R),
+                                     ("⌃C", controlKey, kVK_ANSI_C)] {
             check(Shortcut.reservedUse(of: Shortcut(keyCode: UInt32(key), carbonModifiers: UInt32(carbon))) != nil, "\(combo) is taken")
         }
         let dvorakPaste = Shortcut(keyCode: UInt32(kVK_ANSI_Period), carbonModifiers: UInt32(cmdKey), keyLabel: "V")
@@ -543,6 +563,32 @@ enum PanelSelfTest {
         check(warmPanel?.isVisible == false && warmPage?.url?.host == "chatgpt.com", "built, hidden, on chatgpt.com",
               warmPage?.url?.absoluteString ?? "no page")
         warm.tearDown()
+
+        print("26. ⌃C empties the message box, but not while you type in another field")
+        webView.loadHTMLString("""
+            <form><div contenteditable="true">Quick Chat self-test draft</div></form>
+            <textarea id="other">another field</textarea>
+            """, baseURL: nil)
+        let boxText = "document.querySelector('form [contenteditable]')?.innerText.trim()"
+        spin(until: { evaluate(boxText) as? String == "Quick Chat self-test draft" }, seconds: 5)
+        func clearScript() -> Bool? {
+            var cleared: Bool?, done = false
+            webView.callAsyncJavaScript(PageScripts.clearMessageBoxScript, arguments: [:], in: nil, in: .page) {
+                cleared = try? $0.get() as? Bool
+                done = true
+            }
+            spin(until: { done }, seconds: 3)
+            return cleared
+        }
+        _ = evaluate("document.getElementById('other').focus()")
+        check(clearScript() == false && evaluate(boxText) as? String == "Quick Chat self-test draft",
+              "typing in another field: the message box stays", evaluate(boxText) as? String ?? "no box")
+        _ = evaluate("document.activeElement.blur()")
+        chat.clearMessageBox()
+        spin(until: { evaluate(boxText) as? String == "" }, seconds: 3)
+        check(evaluate(boxText) as? String == "", "emptied", evaluate(boxText) as? String ?? "no box")
+        check(evaluate("document.getElementById('other').value") as? String == "another field", "the other field is left alone")
+        check(clearScript() == false, "an empty message box: nothing to clear")
 
         print(failures == 0 ? "panel self-test: ALL PASSED" : "panel self-test: \(failures) FAILED")
         return failures == 0

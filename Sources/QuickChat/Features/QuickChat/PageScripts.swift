@@ -152,6 +152,22 @@ enum PageScripts {
     static let focusComposerScript =
         "[...document.querySelectorAll('\(messageBoxSelector)')].find(e => e.getClientRects().length)?.focus();"
 
+    /// Empties the message box, as if you selected its text and pressed Delete, unless you're
+    /// typing in another field (a message you're editing, say). Returns whether it had text to
+    /// clear.
+    static let clearMessageBoxScript = """
+        const box = [...document.querySelectorAll('\(messageBoxSelector)')].find(e => e.getClientRects().length);
+        const field = document.activeElement?.closest('input, textarea, [contenteditable="true"]');
+        if (!box || (field && field !== box) || !box.innerText.trim()) return false;
+        box.focus();
+        const all = document.createRange();
+        all.selectNodeContents(box);
+        getSelection().removeAllRanges();
+        getSelection().addRange(all);
+        document.execCommand("delete");
+        return true;
+        """
+
     // MARK: Page touch-ups
 
     /// The page touch-ups, run at the start of every chatgpt.com page load (in the panel and its

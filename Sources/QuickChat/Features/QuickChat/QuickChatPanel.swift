@@ -45,6 +45,8 @@ final class QuickChatPanel: NSPanel {
     var onOpenInBrowser: (() -> Void)?
     /// ⌘R: load the page again.
     var onReload: (() -> Void)?
+    /// ⌃C in the page: empty the message box.
+    var onClearMessage: (() -> Void)?
     /// Local key combo that calls `resetPosition()` while the panel is key (default ⌘O).
     var resetSizeShortcut: Shortcut? = .commandO
     /// The last left mouse-down in the panel, for `dragFromPage()`.
@@ -152,13 +154,22 @@ final class QuickChatPanel: NSPanel {
         return true
     }
 
-    /// Catches the panel's local shortcuts before the web view sees them. Done here rather
+    /// ⌃C while the page has focus (not the find bar's field): `onClearMessage`.
+    private func handleClearMessage(_ event: NSEvent) -> Bool {
+        guard event.modifierFlags.intersection([.shift, .control, .option, .command]) == .control,
+              event.charactersIgnoringModifiers?.lowercased() == "c", firstResponder is WKWebView,
+              let onClearMessage else { return false }
+        onClearMessage()
+        return true
+    }
+
+    /// Catches the panel's local shortcuts and ⌃C before the web view sees them. Done here rather
     /// than in `performKeyEquivalent` so combos without ⌘ (e.g. ⌥R, F5) work too.
     /// Besides chatgpt.com's top bar (`dragFromPage`), ⌃⌘-drag anywhere moves the panel (the
     /// gesture macOS's NSWindowShouldDragOnGesture setting uses). Notes the last mouse-down for
     /// `dragFromPage`.
     override func sendEvent(_ event: NSEvent) {
-        if event.type == .keyDown, handleLocalShortcut(event) { return }
+        if event.type == .keyDown, handleLocalShortcut(event) || handleClearMessage(event) { return }
         if event.type == .leftMouseDown { lastMouseDown = event }
         if event.type == .leftMouseDown,
            event.modifierFlags.intersection([.shift, .control, .option, .command]) == [.control, .command] {

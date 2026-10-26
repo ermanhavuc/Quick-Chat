@@ -182,6 +182,7 @@ final class QuickChatFeature: Feature {
         }
         add("New Chat", "n") { $0.newChat(temporary: false) }
         add("New Temporary Chat", "n", [.command, .shift]) { $0.newChat(temporary: true) }
+        add("Clear Message", "c", .control) { $0.clearMessageBox() }
         add("Reload", "r") { $0.reload() }
         add("Find…", "f", [.command, .shift]) { $0.find(.showFindInterface) }
         menu.addItem(.separator())
