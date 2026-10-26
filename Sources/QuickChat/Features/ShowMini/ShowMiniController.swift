@@ -26,9 +26,12 @@ final class ShowMiniController {
     private let log = Log.make("ShowMini")
     private(set) var reasons: Set<Reason> = []
     private(set) var restarting = false
+    private let isChatGPTInstalled: () -> Bool
 
-    init(keymap: KeymapOverride? = nil) {
+    /// `isChatGPTInstalled`: replaceable for the self-tests.
+    init(keymap: KeymapOverride? = nil, isChatGPTInstalled: @escaping () -> Bool = { ChatGPTApp.isInstalled }) {
         self.keymap = KeymapOverrideGroup([keymap ?? KeymapOverride(target: Self.target)])
+        self.isChatGPTInstalled = isChatGPTInstalled
     }
 
     var isUnbound: Bool { !reasons.isEmpty }
@@ -76,14 +79,17 @@ final class ShowMiniController {
         return entries.compactMap { if case .string(let key)? = $0["key"] { key } else { nil } }
     }
 
-    /// Whether `shortcut` is one of Show Mini's shortcuts.
+    /// Whether `shortcut` is one of Show Mini's shortcuts. Never without the ChatGPT app: then
+    /// Quick Chat runs on its own and leaves the keymap (which the Codex CLI shares) alone.
     func conflicts(with shortcut: Shortcut) -> Bool {
-        userAccelerators.contains { Shortcut(accelerator: $0) == shortcut }
+        guard isChatGPTInstalled() else { return false }
+        return userAccelerators.contains { Shortcut(accelerator: $0) == shortcut }
     }
 
-    /// Mini's shortcut for display, e.g. "⌥Space".
+    /// Mini's shortcut for display, e.g. "⌥Space"; nil without the ChatGPT app.
     var userShortcutDescription: String? {
-        userAccelerators.first.map { Shortcut(accelerator: $0)?.displayString ?? $0 }
+        guard isChatGPTInstalled() else { return nil }
+        return userAccelerators.first.map { Shortcut(accelerator: $0)?.displayString ?? $0 }
     }
 
     // MARK: Restart

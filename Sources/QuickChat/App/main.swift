@@ -9,6 +9,11 @@ MainActor.assumeIsolated {
         NSApplication.shared.setActivationPolicy(.accessory)
         exit(PanelSelfTest.run() ? 0 : 1)
     }
+    if ProcessInfo.processInfo.environment["QUICKCHAT_SELFTEST"] == "feature" {
+        NSApplication.shared.setActivationPolicy(.accessory)
+        EditMenu.install()
+        exit(FeatureSelfTest.run() ? 0 : 1)
+    }
     // Opens Quick Chat panel without enabling any feature (no keymap changes).
     if ProcessInfo.processInfo.environment["QUICKCHAT_DEBUG"] == "panel" {
         NSApplication.shared.setActivationPolicy(.accessory) // creates NSApp, which EditMenu needs

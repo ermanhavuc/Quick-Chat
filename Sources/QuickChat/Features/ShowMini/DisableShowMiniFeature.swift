@@ -26,13 +26,7 @@ final class DisableShowMiniFeature: Feature {
 
     var isChecked: Bool { isEnabled || lockedByQuickChat }
 
-    /// Whether the ChatGPT desktop app is installed. Uses LaunchServices (the same lookup
-    /// `ChatGPTApp.launch()` relies on) plus a file check to drop stale entries for a
-    /// deleted app. `~/.codex` is no signal: the Codex CLI shares it.
-    private var chatGPTInstalled: Bool {
-        guard let url = ChatGPTApp.appURL else { return false }
-        return FileManager.default.fileExists(atPath: url.path)
-    }
+    private var chatGPTInstalled: Bool { ChatGPTApp.isInstalled }
 
     /// Nothing to toggle without ChatGPT; and unchecking couldn't restore Mini while
     /// Quick Chat holds its shortcut.

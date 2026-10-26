@@ -25,7 +25,7 @@ final class MenuController: NSObject, NSMenuDelegate {
     private func rebuild() {
         menu.removeAllItems()
 
-        let header = NSMenuItem(title: "Quick Chat", action: nil, keyEquivalent: "")
+        let header = NSMenuItem(title: Self.nameAndVersion, action: nil, keyEquivalent: "")
         header.isEnabled = false
         menu.addItem(header)
         menu.addItem(.separator())
@@ -40,7 +40,7 @@ final class MenuController: NSObject, NSMenuDelegate {
             toggle.isEnabled = feature.canToggle
             menu.addItem(toggle)
 
-            if let status = feature.statusText {
+            if let status = manager.launchFailure(of: feature) ?? feature.statusText {
                 let item = NSMenuItem(title: status, action: nil, keyEquivalent: "")
                 item.isEnabled = false
                 item.indentationLevel = 1
@@ -60,6 +60,14 @@ final class MenuController: NSObject, NSMenuDelegate {
         menu.addItem(NSMenuItem(title: "Quit Quick Chat",
                                 action: #selector(NSApplication.terminate(_:)),
                                 keyEquivalent: ""))
+    }
+
+    /// "Quick Chat 0.2.0 (49)", or just the name where there's no version (a debug build).
+    private static var nameAndVersion: String {
+        let info = Bundle.main.infoDictionary ?? [:]
+        guard let version = info["CFBundleShortVersionString"] as? String else { return "Quick Chat" }
+        let build = (info["CFBundleVersion"] as? String).map { " (\($0))" } ?? ""
+        return "Quick Chat \(version)\(build)"
     }
 
     /// Adds Quick Chat to, or removes it from, macOS's login items. If macOS wants the user to

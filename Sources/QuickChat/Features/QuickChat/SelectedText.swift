@@ -1,16 +1,21 @@
 import AppKit
 import Carbon.HIToolbox
 
-/// The frontmost app's selected text, read by pressing ⌘C for it and then putting the clipboard
-/// back as it was. Works in any app that can copy text, but pressing keys for another app
-/// needs Accessibility access (`Permissions.checkAccessibility`).
+/// The frontmost app's selected text: asked for through Accessibility, which leaves the clipboard
+/// alone, or, from apps that don't answer (many web browsers and Electron apps), by pressing ⌘C
+/// for it and then putting the clipboard back as it was. Both need Accessibility access
+/// (`Permissions.checkAccessibility`).
 @MainActor
 enum SelectedText {
-    /// The selected text, or nil if nothing was copied (no selection, no text in it, another app
-    /// came to the front in the meantime, or the shortcut's keys were held for over a second).
-    /// An app that takes over a second to copy leaves the selection on the clipboard.
+    /// The selected text, or nil if there's none (no selection, no text in it, another app came
+    /// to the front in the meantime, or the shortcut's keys were held for over a second). An app
+    /// that takes over a second to copy leaves the selection on the clipboard.
     static func copy() async -> String? {
         let app = NSWorkspace.shared.frontmostApplication
+        // Not Quick Chat's own panel: asking yourself through Accessibility can stall until it times out.
+        if app?.processIdentifier != ProcessInfo.processInfo.processIdentifier, let text = accessibilitySelection() {
+            return text
+        }
         // The shortcut's own modifiers may still be down: ⌥ with ⌘C is another command
         // (in Chrome and Brave, Inspect Element), so wait until they're released.
         let released = { CGEventSource.flagsState(.combinedSessionState).isDisjoint(with: modifiers) }
@@ -27,6 +32,22 @@ enum SelectedText {
         let text = pasteboard.string(forType: .string)
         saved.restore(to: pasteboard)
         return text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? text : nil
+    }
+
+    /// The focused element's selected text, if its app tells (nil when it doesn't, or it's
+    /// empty). Waits a quarter second at most for an app that doesn't answer.
+    private static func accessibilitySelection() -> String? {
+        let system = AXUIElementCreateSystemWide()
+        var focused: CFTypeRef?
+        AXUIElementSetMessagingTimeout(system, 0.25)
+        guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
+              let focused, CFGetTypeID(focused) == AXUIElementGetTypeID() else { return nil }
+        let element = focused as! AXUIElement // its type is checked above
+        AXUIElementSetMessagingTimeout(element, 0.25)
+        var selected: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXSelectedTextAttribute as CFString, &selected) == .success,
+              let text = selected as? String, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return text
     }
 
     private static let modifiers: CGEventFlags = [.maskCommand, .maskAlternate, .maskControl, .maskShift]

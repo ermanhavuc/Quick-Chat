@@ -20,6 +20,14 @@ enum ChatGPTApp {
         NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier)
     }
 
+    /// Whether the app is installed: LaunchServices knows it (the lookup `launch()` relies on)
+    /// and it's still on disk (LaunchServices remembers deleted apps for a while). `~/.codex` is
+    /// no sign of it: the Codex CLI uses that folder too.
+    static var isInstalled: Bool {
+        guard let url = appURL else { return false }
+        return FileManager.default.fileExists(atPath: url.path)
+    }
+
     /// Gracefully quits ChatGPT (if running), waits for it to exit, then relaunches it.
     /// If ChatGPT was not running it is simply launched.
     static func restart(timeout: TimeInterval = 15) async throws {

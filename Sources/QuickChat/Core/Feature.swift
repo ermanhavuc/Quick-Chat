@@ -4,7 +4,8 @@ import AppKit
 ///
 /// Rules for implementers:
 /// - `enable()` must be idempotent and throw a descriptive error if it cannot start
-///   (the error is shown to the user via an alert and the feature stays off).
+///   (the error is shown to the user via an alert, or at launch in the menu, and the feature
+///   stays off).
 /// - `disable()` must be idempotent, must not throw, and must restore every piece of
 ///   state the feature changed (files, hotkeys, event taps, windows...). It is called
 ///   when the user toggles the feature off AND when the app quits

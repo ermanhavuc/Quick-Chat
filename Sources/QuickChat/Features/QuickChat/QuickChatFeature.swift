@@ -35,6 +35,9 @@ final class QuickChatFeature: Feature {
 
     func enable() throws {
         guard !isEnabled else { return }
+        // An open Change Shortcut… (opened while off) saves its shortcuts as it closes, before
+        // they're registered: while it's open they must stay free for it to record them.
+        recorder.close()
         try showMini.set(.quickChatShortcut, active: showMini.conflicts(with: shortcut))
         do {
             try registerHotKey()
@@ -44,20 +47,29 @@ final class QuickChatFeature: Feature {
         }
         isEnabled = true
         log.info("Enabled with shortcut \(self.shortcut.displayString, privacy: .public)")
+        chat.preload()
     }
 
     func disable() {
+        // First, so closing an open Change Shortcut… window below only saves its shortcuts and
+        // doesn't register them again.
+        isEnabled = false
         unregisterHotKeys()
         recorder.close()
         chat.tearDown()
         try? showMini.set(.quickChatShortcut, active: false)
-        isEnabled = false
         log.info("Disabled")
     }
 
     /// Puts the Quick Chat panel back at the bottom center, keeping its size (same as the Reset
     /// Position shortcut).
     func resetPosition() { chat.resetPosition() }
+
+    /// A click on the menu-bar icon: shows or hides the panel.
+    func togglePanel() {
+        guard isEnabled else { return }
+        chat.toggleFromMenuBar()
+    }
 
     /// Registers the Quick Chat shortcut (throws if it can't) and the Ask shortcuts. If only an
     /// Ask one fails (another app has it), Quick Chat still works and the menu says so, so
@@ -132,18 +144,63 @@ final class QuickChatFeature: Feature {
         return unavailable.map { "\($0.name): \($0.shortcut.displayString) is unavailable" }.joined(separator: "; ")
     }
 
+    /// While it's off, just Change Shortcut…, so a shortcut another app has taken can be changed
+    /// before turning Quick Chat on again.
     func menuItems() -> [NSMenuItem] {
-        guard isEnabled else { return [] }
+        let changeShortcut = ActionMenuItem("Change Shortcut… (\(shortcut.displayString))") { [weak self] in self?.editShortcut() }
+        guard isEnabled else { return [changeShortcut] }
+        let openInBrowser = ActionMenuItem("Open Chat in Browser", keyEquivalent: "b", isEnabled: chat.chatURLForBrowser != nil) {
+            [weak self] in self?.chat.openChatInBrowser()
+        }
+        openInBrowser.keyEquivalentModifierMask = [.command, .shift]
         var items: [NSMenuItem] = [
-            ActionMenuItem("Open Chat in Browser (⇧⌘B)", isEnabled: chat.chatURLForBrowser != nil) { [weak self] in
-                self?.chat.openChatInBrowser()
-            },
+            ActionMenuItem("Show Quick Chat (\(shortcut.displayString))") { [weak self] in self?.chat.show() },
             ActionMenuItem("Ask About Clipboard (\(clipboardShortcut.displayString))") { [weak self] in self?.askAboutClipboard() },
-            ActionMenuItem("Change Shortcut… (\(shortcut.displayString))") { [weak self] in self?.editShortcut() },
+            openInBrowser,
+            panelShortcutsItem(),
+            changeShortcut,
             ActionMenuItem("Sign Out of Quick Chat…") { [weak self] in self?.confirmSignOut() },
         ]
         if takesMiniShortcut, let restart = showMini.restartMenuItem() { items.insert(restart, at: 0) }
         return items
+    }
+
+    /// Keyboard Shortcuts: the panel's own keys (they work while it's focused), each also an item
+    /// that opens the panel and does it.
+    private func panelShortcutsItem() -> NSMenuItem {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        func add(_ title: String, _ key: String, _ modifiers: NSEvent.ModifierFlags = .command,
+                 show: Bool = true, _ run: @escaping @MainActor (QuickChatController) -> Void) {
+            let item = ActionMenuItem(title, keyEquivalent: key) { [weak self] in
+                guard let chat = self?.chat else { return }
+                if show { chat.show() }
+                run(chat)
+            }
+            item.keyEquivalentModifierMask = modifiers
+            menu.addItem(item)
+        }
+        add("New Chat", "n") { $0.newChat(temporary: false) }
+        add("New Temporary Chat", "n", [.command, .shift]) { $0.newChat(temporary: true) }
+        add("Reload", "r") { $0.reload() }
+        add("Find…", "f", [.command, .shift]) { $0.find(.showFindInterface) }
+        menu.addItem(.separator())
+        add("Zoom In", "=") { $0.zoom(1) }
+        add("Zoom Out", "-") { $0.zoom(-1) }
+        add("Default Zoom", "0") { $0.zoom(0) }
+        menu.addItem(.separator())
+        add("More Thinking", "]") { $0.stepEffort(1) }
+        add("Less Thinking", "[") { $0.stepEffort(-1) }
+        menu.addItem(.separator())
+        if let (key, modifiers) = chat.resetSizeShortcut.menuKeyEquivalent {
+            add("Reset Position", key, modifiers) { $0.resetPosition() }
+        } else {
+            add("Reset Position (\(chat.resetSizeShortcut.displayString))", "", []) { $0.resetPosition() }
+        }
+        add("Hide Quick Chat", "w", show: false) { $0.hide(restoreFocus: false) }
+        let item = NSMenuItem(title: "Keyboard Shortcuts", action: nil, keyEquivalent: "")
+        item.submenu = menu
+        return item
     }
 
     /// Signing out deletes the panel's sign-in, so it asks first.
@@ -175,7 +232,14 @@ final class QuickChatFeature: Feature {
             self?.chat.resetSizeShortcut = new
             new.saveAsResetSize()
         }, onClose: { [weak self] in
-            guard let self, self.isEnabled else { return }
+            guard let self else { return }
+            guard self.isEnabled else {
+                // Off: nothing to register (or to check with Show Mini) until it's turned on.
+                self.shortcut.save()
+                self.askShortcut.saveAsAsk()
+                self.clipboardShortcut.saveAsAskClipboard()
+                return
+            }
             do {
                 try self.registerHotKey()
                 if let error = self.unavailable.first?.error { throw error }
@@ -199,4 +263,10 @@ final class QuickChatFeature: Feature {
             }
         })
     }
+
+    #if DEBUG
+    /// For the self-tests: how many global shortcuts are registered, and Change Shortcut….
+    var registeredHotKeyCount: Int { [hotKey, askHotKey, clipboardHotKey].compactMap { $0 }.count }
+    func openShortcutsForSelfTest() { editShortcut() }
+    #endif
 }

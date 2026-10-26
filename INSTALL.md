@@ -167,7 +167,8 @@ Tell the user:
 1. Quick Chat appears **only in the menu bar** (a speech bubble with sparkles). There's no
    Dock icon or window yet. If the menu bar is crowded, the icon may be hidden behind the
    notch; quitting another menu-bar app or using a menu-bar manager reveals it.
-2. Click the icon and turn on **Quick Chat**. Both features start off.
+2. Click the icon and turn on **Quick Chat**. Both features start off. From then on, a click
+   on the icon opens the panel; right-click (or ⌃-click) the icon for the menu.
 3. Press **⌥Space**. A small panel opens with chatgpt.com. Sign in once inside it. Email,
    Apple or Microsoft sign-in are the most reliable; Google sign-in works today but Google may
    block embedded browsers at any time.
@@ -181,7 +182,7 @@ Tell the user:
 To launch it at login, choose **Launch at Login** in its menu.
 
 To ask about text from another app, select it and press **⌥⇧Space**. The first time, macOS asks
-for Accessibility access (Quick Chat presses ⌘C to copy the selection): allow Quick Chat in
+for Accessibility access (Quick Chat reads the selection, or presses ⌘C to copy it): allow Quick Chat in
 **System Settings → Privacy & Security → Accessibility**, then press ⌥⇧Space again.
 
 ---
@@ -193,7 +194,7 @@ for Accessibility access (Quick Chat presses ⌘C to copy the selection): allow 
 | "Quick Chat is damaged and can't be opened" | The zip was unpacked by a tool that broke the signature. Re-download, unzip with Finder or `ditto` (step R3), then do step R4. |
 | "Open Anyway" button not in Privacy & Security | It only shows for about an hour after a blocked launch. Open the app again, then look again. |
 | Nothing visible after opening | It's a menu-bar app; look for the icon, which can be hidden behind the notch. `pgrep -x QuickChat` confirms it's running. |
-| ⌥Space does nothing | Turn on **Quick Chat** in the menu. If ChatGPT still grabs ⌥Space, choose **Restart ChatGPT to Apply**. Another app (Raycast, Alfred, input-source switching) may also own ⌥Space; pick a different shortcut with **Change Shortcut…**. |
+| ⌥Space does nothing | Turn on **Quick Chat** in the menu. If ChatGPT still grabs ⌥Space, choose **Restart ChatGPT to Apply**. Another app (Raycast, Alfred, input-source switching) may also own ⌥Space; pick a different shortcut with **Change Shortcut…**. If the menu says "Couldn't start" under Quick Chat, it couldn't get its shortcut at login: **Change Shortcut…** is there while it's off too; pick another, then turn Quick Chat on. |
 | `swift build` fails with "Unknown error parsing property list" | Happens with the Command Line Tools alone. Install Xcode and select it (B1). |
 | `UNIVERSAL=1 make` fails | Universal builds need full Xcode, and a normal `make` is fine for one Mac. |
 | `swift: command not found` / `xcrun: error: invalid active developer path` | Developer tools are missing; see B1. |

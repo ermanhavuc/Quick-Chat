@@ -57,7 +57,7 @@ final class ShortcutRecorderWindow: NSObject, NSWindowDelegate {
 
         hint.stringValue = miniShortcut.map {
             "ChatGPT's Show Mini uses \($0).\nChoosing the same shortcut turns Show Mini off while Quick Chat is on."
-        } ?? "ChatGPT's Show Mini has no shortcut,\nso any shortcut is free."
+        } ?? "ChatGPT's Show Mini has no shortcut (or the ChatGPT app\nisn't installed), so any shortcut is free."
         let window = self.window ?? makeWindow()
         self.window = window
         // Size to content (the hint text may differ between opens); width stays 424.

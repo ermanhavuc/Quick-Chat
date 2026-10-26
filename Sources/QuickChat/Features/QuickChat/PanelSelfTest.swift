@@ -93,6 +93,13 @@ enum PanelSelfTest {
         _ = press("[", [])
         _ = press("]", [.command, .control])
         check(steps == [-1, 1], "⌘[ → down, ⌘] → up; plain [ and ⌃⌘] ignored", "\(steps)")
+        var reloads = 0
+        let reload = panel.onReload
+        panel.onReload = { reloads += 1 }
+        check(press("r") && reloads == 1, "⌘R reloads")
+        _ = press("r", [.command, .shift])
+        check(reloads == 1, "⇧⌘R doesn't")
+        panel.onReload = reload
 
         print("5. starts on a new saved chat; ⌘N / ⇧⌘N start a new saved / temporary chat")
         let start = webView.url?.absoluteString ?? "none"
@@ -238,7 +245,7 @@ enum PanelSelfTest {
 
         print("14. no shortcut can take the panel's or chatgpt.com's keys")
         for (combo, carbon, key) in [("⌘V", cmdKey, kVK_ANSI_V), ("⌘K", cmdKey, kVK_ANSI_K), ("⇧⌘F", cmdKey | shiftKey, kVK_ANSI_F),
-                                     ("⌘W", cmdKey, kVK_ANSI_W), ("⌘↩", cmdKey, kVK_Return)] {
+                                     ("⌘W", cmdKey, kVK_ANSI_W), ("⌘↩", cmdKey, kVK_Return), ("⌘R", cmdKey, kVK_ANSI_R)] {
             check(Shortcut.reservedUse(of: Shortcut(keyCode: UInt32(key), carbonModifiers: UInt32(carbon))) != nil, "\(combo) is taken")
         }
         let dvorakPaste = Shortcut(keyCode: UInt32(kVK_ANSI_Period), carbonModifiers: UInt32(cmdKey), keyLabel: "V")
@@ -314,7 +321,7 @@ enum PanelSelfTest {
             form.innerHTML = '<button type="button" class="bg-composer-primary" style="width: 20px; height: 20px">Stop</button>';
             document.body.append(form);
             """#)
-        check(evaluate(QuickChatController.answeringScript) as? Bool == true, "the stand-in reads as answering")
+        check(evaluate(PageScripts.answeringScript) as? Bool == true, "the stand-in reads as answering")
         chat.hide(restoreFocus: false)
         spin(until: { false }, seconds: 1.5)
         check(!chat.hasUnseenAnswer, "hidden while answering: no dot yet")
@@ -447,6 +454,95 @@ enum PanelSelfTest {
               "list; another address, another site, a list request with its signal overridden (status, calls): \(retried ?? "nothing")")
         userContent.removeAllUserScripts()
         for script in pageScripts { userContent.addUserScript(script) }
+
+        print("21. the page's confirm() asks in a sheet; not while the panel is hidden")
+        func texts(in view: NSView?) -> [String] {
+            guard let view else { return [] }
+            return ((view as? NSTextField).map { [$0.stringValue] } ?? []) + view.subviews.flatMap(texts(in:))
+        }
+        var confirmed: Any?
+        webView.evaluateJavaScript("confirm('Quick Chat self-test')") { value, _ in confirmed = value }
+        spin(until: { panel.attachedSheet != nil }, seconds: 3)
+        let sheetTexts = texts(in: panel.attachedSheet?.contentView)
+        check(sheetTexts.contains("chatgpt.com says:") && sheetTexts.contains("Quick Chat self-test"),
+              "a sheet says which site asks, and what", "\(sheetTexts)")
+        if let sheet = panel.attachedSheet { panel.endSheet(sheet, returnCode: .alertFirstButtonReturn) }
+        spin(until: { confirmed != nil }, seconds: 3)
+        check(confirmed as? Bool == true, "OK → true", "\(confirmed ?? "nothing")")
+        chat.hide(restoreFocus: false)
+        confirmed = nil
+        webView.evaluateJavaScript("confirm('Quick Chat self-test')") { value, _ in confirmed = value }
+        spin(until: { confirmed != nil }, seconds: 3)
+        check(confirmed as? Bool == false && panel.attachedSheet == nil, "hidden: no sheet, false", "\(confirmed ?? "nothing")")
+        chat.show()
+        confirmed = nil
+        webView.evaluateJavaScript("confirm('Quick Chat self-test')") { value, _ in confirmed = value }
+        spin(until: { panel.attachedSheet != nil }, seconds: 3)
+        chat.hide(restoreFocus: false)
+        spin(until: { confirmed != nil }, seconds: 3)
+        check(confirmed as? Bool == false && panel.attachedSheet == nil, "hiding the panel answers an open one: false",
+              "\(confirmed ?? "nothing")")
+
+        print("22. the shortcut brings an open panel to the front from another window, and hides a focused one")
+        chat.show()
+        spin(until: { NSApp.isActive && panel.isKeyWindow }, seconds: 2)
+        if NSApp.isActive {
+            let other = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: [.titled],
+                                 backing: .buffered, defer: false)
+            other.isReleasedWhenClosed = false
+            other.level = .floating
+            other.makeKeyAndOrderFront(nil)
+            spin(until: { !panel.isKeyWindow }, seconds: 2)
+            check(panel.isVisible && !panel.isKeyWindow, "another window has focus, the panel stays up")
+            chat.toggle()
+            spin(until: { panel.isKeyWindow }, seconds: 2)
+            check(panel.isVisible && panel.isKeyWindow, "the shortcut focuses the panel")
+            chat.toggle()
+            check(!panel.isVisible, "pressed again: hidden")
+            other.close()
+        } else {
+            // macOS lets a process started from a shell become active only while it's frontmost.
+            print("  skip macOS didn't let the self-test become the active app")
+        }
+
+        print("23. Ask About Selection that can't put its text in a chat offers to copy it")
+        webView.load(URLRequest(url: URL(string: "about:blank")!))
+        spin(until: { webView.url?.absoluteString == "about:blank" && !webView.isLoading && !content.isLoading }, seconds: 5)
+        chat.ask(about: "Quick Chat self-test text")
+        spin(until: { content.toastText != nil }, seconds: 5)
+        check(content.toastText == "Couldn't put the text in a new chat", "it says so, with Copy Text", content.toastText ?? "no toast")
+
+        print("24. a page that doesn't load: a message over a page that's there, Try Again in place of one that isn't")
+        let unreachable = URLRequest(url: URL(string: "https://quick-chat-self-test.invalid/")!)
+        webView.load(unreachable)
+        spin(until: { content.toastText?.hasPrefix("Couldn't load") == true }, seconds: 10)
+        check(content.toastText?.hasPrefix("Couldn't load") == true && !content.isShowingError, "over a page: a message, the page stays",
+              content.toastText ?? "no toast")
+        content.setLoading(true) // as while a page is on its way
+        webView.load(unreachable)
+        spin(until: { content.isShowingError }, seconds: 10)
+        func buttons(in view: NSView) -> [NSButton] { ((view as? NSButton).map { [$0] } ?? []) + view.subviews.flatMap(buttons(in:)) }
+        let tryAgain = buttons(in: content).first { $0.title == "Try Again" }
+        check(content.isShowingError && tryAgain != nil && webView.alphaValue == 0, "in place of the page: an error with Try Again")
+        tryAgain?.performClick(nil)
+        spin(until: { !content.isShowingError && !content.isLoading }, seconds: 10)
+        check(!content.isShowingError && !content.isLoading && webView.url?.absoluteString == "about:blank",
+              "Try Again loads the page again", webView.url?.absoluteString ?? "no page")
+        content.setLoading(true)
+        webView.load(unreachable)
+        chat.ask(about: "Quick Chat self-test text") // waits for the page, which won't load
+        spin(until: { content.isShowingError }, seconds: 10)
+        check(content.isShowingError && content.toastText == "Couldn't put the text in a new chat",
+              "text waiting for a page that doesn't load: offered to copy", content.toastText ?? "no toast")
+
+        print("25. a preloaded panel loads chatgpt.com before it's shown")
+        let warm = QuickChatController()
+        warm.preload()
+        let warmPanel = NSApp.windows.lazy.compactMap { $0 as? QuickChatPanel }.first { $0 !== panel }
+        let warmPage = warmPanel.flatMap { $0.contentView?.superview }.flatMap(webView(in:))
+        check(warmPanel?.isVisible == false && warmPage?.url?.host == "chatgpt.com", "built, hidden, on chatgpt.com",
+              warmPage?.url?.absoluteString ?? "no page")
+        warm.tearDown()
 
         print(failures == 0 ? "panel self-test: ALL PASSED" : "panel self-test: \(failures) FAILED")
         return failures == 0

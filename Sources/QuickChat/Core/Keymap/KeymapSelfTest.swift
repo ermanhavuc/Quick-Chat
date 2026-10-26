@@ -188,7 +188,7 @@ enum KeymapSelfTest {
         print("8. Show Mini controller: reasons + Quick Chat shortcut conflicts")
         do {
             let (km, _) = fresh()
-            let mini = ShowMiniController(keymap: km)
+            let mini = ShowMiniController(keymap: km, isChatGPTInstalled: { true })
             check(Shortcut(accelerator: "Alt+Space") == .optionSpace, "parses Alt+Space")
             check(Shortcut(accelerator: "CmdOrCtrl+Shift+K")?.displayString == "⇧⌘K", "parses CmdOrCtrl+Shift+K")
             check(Shortcut(accelerator: "Control+Alt+Shift+F19")?.displayString == "⌃⌥⇧F19", "parses F19")
@@ -210,6 +210,20 @@ enum KeymapSelfTest {
             put(#"[{"command":"openAvatarOverlay","key":null}]"#, km.keymapURL)
             check(!mini.conflicts(with: .optionSpace) && mini.userShortcutDescription == nil, "user unbound Mini → no conflict")
         } catch { check(false, "case 8 threw", "\(error)") }
+
+        print("9. without the ChatGPT app, Quick Chat leaves the keymap alone")
+        do {
+            let (km, _) = fresh()
+            let mini = ShowMiniController(keymap: km, isChatGPTInstalled: { false })
+            check(!mini.conflicts(with: .optionSpace) && mini.userShortcutDescription == nil,
+                  "no file, no app → ⌥Space doesn't conflict, no Mini shortcut")
+            try mini.set(.quickChatShortcut, active: mini.conflicts(with: .optionSpace)) // as QuickChatFeature.enable does
+            check(!FileManager.default.fileExists(atPath: km.keymapURL.path) && !mini.isUnbound, "no keymap written")
+            put("not json", km.keymapURL)
+            check(!mini.conflicts(with: .optionSpace), "a keymap that isn't valid JSON doesn't matter either")
+            try mini.set(.quickChatShortcut, active: mini.conflicts(with: .optionSpace))
+            check(text(km.keymapURL) == "not json", "… and stays as it was")
+        } catch { check(false, "case 9 threw", "\(error)") }
 
         print(failures == 0 ? "keymap self-test: ALL PASSED" : "keymap self-test: \(failures) FAILED")
         return failures == 0

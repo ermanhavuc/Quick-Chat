@@ -92,6 +92,7 @@ struct Shortcut: Codable, Equatable {
             (kVK_ANSI_RightBracket, "]", cmd, "More Thinking"),
             (kVK_ANSI_F, "f", cmd | shift, "Find"), (kVK_ANSI_G, "g", cmd, "Find Next"),
             (kVK_ANSI_G, "g", cmd | shift, "Find Previous"), (kVK_ANSI_B, "b", cmd | shift, "Open Chat in Browser"),
+            (kVK_ANSI_R, "r", cmd, "Reload"),
             (kVK_ANSI_Z, "z", cmd, "Undo"), (kVK_ANSI_Z, "z", cmd | shift, "Redo"), (kVK_ANSI_X, "x", cmd, "Cut"),
             (kVK_ANSI_C, "c", cmd, "Copy"), (kVK_ANSI_V, "v", cmd, "Paste"),
             (kVK_ANSI_V, "v", cmd | option | shift, "Paste and Match Style"), (kVK_ANSI_A, "a", cmd, "Select All"),
@@ -117,6 +118,33 @@ struct Shortcut: Codable, Equatable {
         if carbonModifiers & UInt32(cmdKey) != 0 { s += "⌘" }
         return s + (Self.keyNames[Int(keyCode)] ?? keyLabel ?? "Key \(keyCode)")
     }
+
+    /// The key equivalent and modifiers that show this shortcut at a menu item's right edge, as
+    /// menus show their own keys; nil for a key a menu can't show that way.
+    var menuKeyEquivalent: (key: String, modifiers: NSEvent.ModifierFlags)? {
+        guard let key = Self.menuKeys[Int(keyCode)] ?? keyLabel.flatMap({ $0.count == 1 ? $0.lowercased() : nil })
+        else { return nil }
+        var modifiers: NSEvent.ModifierFlags = []
+        if carbonModifiers & UInt32(controlKey) != 0 { modifiers.insert(.control) }
+        if carbonModifiers & UInt32(optionKey) != 0 { modifiers.insert(.option) }
+        if carbonModifiers & UInt32(shiftKey) != 0 { modifiers.insert(.shift) }
+        if carbonModifiers & UInt32(cmdKey) != 0 { modifiers.insert(.command) }
+        return (key, modifiers)
+    }
+
+    /// Key equivalents for the keys that don't type a character of their own.
+    private static let menuKeys: [Int: String] = {
+        var keys: [Int: Int] = [
+            kVK_Space: 0x20, kVK_Return: 0x0D, kVK_Tab: 0x09, kVK_Escape: 0x1B, kVK_Delete: 0x08,
+            kVK_ForwardDelete: 0x7F, kVK_LeftArrow: NSLeftArrowFunctionKey, kVK_RightArrow: NSRightArrowFunctionKey,
+            kVK_UpArrow: NSUpArrowFunctionKey, kVK_DownArrow: NSDownArrowFunctionKey, kVK_Home: NSHomeFunctionKey,
+            kVK_End: NSEndFunctionKey, kVK_PageUp: NSPageUpFunctionKey, kVK_PageDown: NSPageDownFunctionKey,
+        ]
+        let fkeys = [kVK_F1, kVK_F2, kVK_F3, kVK_F4, kVK_F5, kVK_F6, kVK_F7, kVK_F8, kVK_F9, kVK_F10,
+                     kVK_F11, kVK_F12, kVK_F13, kVK_F14, kVK_F15, kVK_F16, kVK_F17, kVK_F18, kVK_F19, kVK_F20]
+        for (i, code) in fkeys.enumerated() { keys[code] = NSF1FunctionKey + i }
+        return keys.compactMapValues { UnicodeScalar(UInt32($0)).map { String(Character($0)) } }
+    }()
 
     private static let functionKeys: Set<Int> = [
         kVK_F1, kVK_F2, kVK_F3, kVK_F4, kVK_F5, kVK_F6, kVK_F7, kVK_F8, kVK_F9, kVK_F10,
